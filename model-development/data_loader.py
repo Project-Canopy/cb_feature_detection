@@ -123,11 +123,11 @@ class DataLoader:
         if path_img.numpy().decode() in self.labels_file_train.paths.to_list():
             # Training csv
             id = int(self.labels_file_train[self.labels_file_train.paths == path_img.numpy().decode()].index.values)
+            label = self.labels_file_train.drop('paths', 1).iloc[int(id)].to_list()
         else:
             # Validation csv
             id = int(self.labels_file_val[self.labels_file_val.paths == path_img.numpy().decode()].index.values)
-
-        label = self.labels_file_train.drop('paths', 1).iloc[int(id)].to_list()
+            label = self.labels_file_val.drop('paths', 1).iloc[int(id)].to_list()
         return label
 
     def process_path(self, file_path):
