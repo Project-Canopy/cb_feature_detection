@@ -72,7 +72,13 @@ class DataLoader:
 
     def build_training_dataset(self):
         self.training_dataset = tf.data.Dataset.from_tensor_slices(self.training_filenames)
-        self.training_dataset = self.training_dataset.map((lambda x: tf.py_function(self.process_path, [x], self.output_shape)), num_parallel_calls=self.num_parallel_calls)
+        self.training_dataset = self.training_dataset.map((
+            lambda x: tf.py_function(self.process_path, [x], self.output_shape)),
+            num_parallel_calls=self.num_parallel_calls)
+        # if self.augment is True:
+        # self.training_dataset = self.training_dataset.map(
+        #         lambda image, label: (tf.image.random_flip_left_right(image), label)
+        #   )
 
         if self.enable_just_shuffle is True:
             if self.shuffle_and_repeat is False:
@@ -116,18 +122,26 @@ class DataLoader:
                 train_img = np.transpose(src.read(), (1, 2, 0))
             else:
                 train_img = np.transpose(src.read(bands), (1, 2, 0))
-        train_img = tf.convert_to_tensor(train_img / self.normalization_value, dtype=self.training_data_type)
+        # train_img = tf.convert_to_tensor(train_img / self.normalization_value, dtype=self.training_data_type)
+        # https://albumentations.ai/docs/examples/tensorflow-example/
+        # cast and normalize image
+        train_img = tf.image.convert_image_dtype(train_img, tf.float32)
+        # apply simple augmentations
+        train_img = tf.image.random_flip_left_right(train_img)
+        train_img = tf.image.random_flip_up_down(train_img)
+        train_img = tf.image.rot90(train_img)
+
         return train_img
 
     def get_label_from_csv(self, path_img):
         if path_img.numpy().decode() in self.labels_file_train.paths.to_list():
             # Training csv
             id = int(self.labels_file_train[self.labels_file_train.paths == path_img.numpy().decode()].index.values)
+            label = self.labels_file_train.drop('paths', 1).iloc[int(id)].to_list()
         else:
             # Validation csv
             id = int(self.labels_file_val[self.labels_file_val.paths == path_img.numpy().decode()].index.values)
-
-        label = self.labels_file_train.drop('paths', 1).iloc[int(id)].to_list()
+            label = self.labels_file_val.drop('paths', 1).iloc[int(id)].to_list()
         return label
 
     def process_path(self, file_path):
