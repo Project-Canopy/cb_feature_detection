@@ -133,3 +133,4 @@ dmypy.json
 *.zarr/
 
 data-prep/yes_chips_s3.json
+*.h5
