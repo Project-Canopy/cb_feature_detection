@@ -13,10 +13,12 @@ import keras
 import pandas as pd
 import boto3
 import io
+import json
 
 class DataLoader:
     def __init__(self, label_file_path_train="labels_test_v1.csv",
                  label_file_path_val="labels_val.csv",
+                 label_mapping_path="labels.json",
                  bucket_name='canopy-production-ml',
                  data_extension_type='.tif',
                  bands=['all'],
@@ -45,6 +47,9 @@ class DataLoader:
         self.label_file_path_val = label_file_path_val
         self.labels_file_val = pd.read_csv(self.label_file_path_val)
         self.validation_filenames = self.labels_file_val.paths.to_list()
+        
+        self.label_mapping_path = label_mapping_path
+        
         self.bands = bands
         self.bucket_name = bucket_name
 
@@ -75,6 +80,8 @@ class DataLoader:
 
         self.build_training_dataset()
         self.build_validation_dataset()
+
+        self.class_weight = self.generate_class_weight()
 
     def build_training_dataset(self):
         self.training_dataset = tf.data.Dataset.from_tensor_slices(self.training_filenames)
@@ -173,6 +180,36 @@ class DataLoader:
             img = tf.image.transpose(img)
 
         return img, label
+    
+    def generate_class_weight(self):
+
+        # generate class_weights dict to be used for class_weight attribute in model
+    
+        df = pd.read_csv(self.label_file_path_train)
+
+        with open(self.label_mapping_path) as jsonfile:
+            data = json.load(jsonfile)
+            num_labels = len(data['label_names'].keys())
+
+        labels = {}
+        no_label_class = []
+        for column in df.columns[0:num_labels]:
+            try:
+                col_count = df[column].value_counts()[1]
+                labels[column] = col_count
+            except:
+                no_label_class.append(column)
+        
+        print(f"Your training file is missing positive labels for classes {no_label_class}")
+
+        labels_sum = sum(labels.values())
+        keys_len = len(labels.keys())
+
+        class_weight = {}
+        for label_name in labels.keys():
+            class_weight[int(label_name)] = (1 / labels[label_name]) * (labels_sum)/keys_len
+
+        return class_weight
 
 if __name__ == '__main__':
     gen = DataLoader(label_file_path_train="labels_test_v1.csv",
