@@ -134,3 +134,8 @@ dmypy.json
 
 data-prep/yes_chips_s3.json
 *.h5
+
+# wandb
+
+model-development/wandb/
+
