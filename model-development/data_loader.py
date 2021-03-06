@@ -109,13 +109,8 @@ class DataLoader:
                     num_parallel_calls=self.num_parallel_calls)
             print("Training on {} images ".format(len(self.training_filenames)))
 
-
         if self.enable_shuffle is True:
-            if self.shuffle_and_repeat is False:
-                self.training_dataset = self.training_dataset.shuffle(self.training_data_shuffle_buffer_size)
-            else:
-                self.logger.warning(
-                    ('Can not enable just shuffling of dataset because shuffle and repeat enabled'))
+            self.training_dataset = self.training_dataset.shuffle(self.training_data_shuffle_buffer_size)
 
         if self.training_data_batch_size is not None:
             self.training_dataset = self.training_dataset.batch(self.training_data_batch_size)
@@ -124,7 +119,7 @@ class DataLoader:
             self.training_dataset = self.training_dataset.prefetch(self.data_prefetch_size)
 
     def build_validation_dataset(self):
-        self.validation_dataset = tf.data.Dataset.from_tensor_slices(self.validation_filenames)
+        self.validation_dataset = tf.data.Dataset.from_tensor_slices(list(self.validation_filenames))
         self.validation_dataset = self.validation_dataset.map((lambda x: tf.py_function(self.process_path, [x], self.output_shape)), num_parallel_calls=self.num_parallel_calls)
 
         self.validation_dataset = self.validation_dataset.batch(self.training_data_batch_size)
@@ -165,6 +160,7 @@ class DataLoader:
     def process_path_train_set_augment(self, file_path):
         label = self.get_label_from_csv(file_path)
         img = self.read_image(file_path)
+        # TODO no all augmentations at once
         # apply simple augmentations
         if self.random_flip_up_down is True:
             img = tf.image.random_flip_up_down(img)
@@ -230,11 +226,6 @@ if __name__ == '__main__':
                         training_data_type=tf.float32,
                         label_data_type=tf.uint8,
                         num_parallel_calls=int(2))
-
-    no_of_val_imgs = len(gen.validation_filenames)
-    no_of_train_imgs = len(gen.training_filenames)
-    print("Validation on {} images ".format(str(no_of_val_imgs)))
-    print("Training on {} images ".format(str(no_of_train_imgs)))
 
     def Simple_CNN(numclasses, input_shape):
         model = Sequential([
