@@ -3,7 +3,6 @@ import multiprocessing
 import rasterio
 import tensorflow as tf
 import numpy as np
-import os
 from tensorflow.keras.models import *
 from tensorflow.keras.layers import *
 from tensorflow.keras import layers
@@ -29,7 +28,7 @@ def parse_args():
     #parser.add_argument('--max_sequence_len', type=int)
     
     # data directories
-    # parser.add_argument('--data', type=str, default=os.environ.get('SM_CHANNEL_DATA'))
+    parser.add_argument('--data', type=str, default=os.environ.get('SM_CHANNEL_DATA'))
     #parser.add_argument('--output', type=str, default=os.environ.get('SM_CHANNEL_OUTPUT'))
 #     parser.add_argument('--train', type=str, default=os.environ.get('SM_CHANNEL_TRAIN'))
 #     parser.add_argument('--val', type=str, default=os.environ.get('SM_CHANNEL_VAL'))
@@ -48,7 +47,7 @@ class DataLoader:
     def __init__(self, label_file_path_train="labels_test_v1.csv",
                  label_file_path_val="labels_val.csv",
                  label_mapping_path="labels.json",
-                 s3_file_paths=False,
+                 s3_file_paths=True,
                  bucket_name='canopy-production-ml',
                  data_extension_type='.tif',
                  bands=['all'],
@@ -85,6 +84,7 @@ class DataLoader:
             self.label_file_path_train = label_file_path_train
             self.label_file_path_val = label_file_path_val
             self.label_mapping_path = label_mapping_path
+    
 
         self.labels_file_train = pd.read_csv(self.label_file_path_train)
         self.training_filenames = self.labels_file_train.paths.to_list()
@@ -258,17 +258,20 @@ class DataLoader:
 
 if __name__ == '__main__':
 
-#     args, _ = parse_args()
+    args, _ = parse_args()
+    
+    data_dir = args.data
+
+    label_file_path_train = os.path.join(data_dir, 'labels_test_v1.csv')
+    label_file_path_val = os.path.join(data_dir,'val_labels.csv')
+    label_mapping_path = os.path.join(data_dir,'labels.json')
+    
     batch_size = 20
-#     label_file_path_train = args.train
-#     label_file_path_val = args.val
-#     label_mapping_path = args.labels
 
-
-    gen = DataLoader(label_file_path_train="/opt/ml/code/labels_test_v1.csv",
-                     label_file_path_val="/opt/ml/code/labels_val.csv",
-                     label_mapping_path="/opt/ml/code/labels.json",
-                    s3_file_paths=True,
+    gen = DataLoader(label_file_path_train=label_file_path_train,
+                     label_file_path_val=label_file_path_val,
+                     label_mapping_path=label_mapping_path,
+                    s3_file_paths=False,
                     bucket_name='canopy-production-ml',
                     data_extension_type='.tif',
                     training_data_shape=(100, 100, 18),
