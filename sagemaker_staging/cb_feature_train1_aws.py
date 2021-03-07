@@ -48,6 +48,7 @@ class DataLoader:
     def __init__(self, label_file_path_train="labels_test_v1.csv",
                  label_file_path_val="labels_val.csv",
                  label_mapping_path="labels.json",
+                 s3_file_paths=True,
                  bucket_name='canopy-production-ml',
                  data_extension_type='.tif',
                  bands=['all'],
@@ -69,18 +70,29 @@ class DataLoader:
                  num_parallel_calls=2 * multiprocessing.cpu_count(),
                  output_shape=(tf.float32, tf.uint8)):
 
-        self.label_file_path_train = label_file_path_train
+        self.s3 = boto3.resource('s3')
+        self.bucket_name = bucket_name
+        self.s3_file_paths = s3_file_paths
+
+        if self.s3_file_paths:
+
+            self.label_file_path_train = self.read_s3_obj(label_file_path_train)
+            self.label_file_path_val = self.read_s3_obj(label_file_path_val)
+            self.label_mapping_path = self.read_s3_obj(label_mapping_path)
+
+        else:
+
+            self.label_file_path_train = label_file_path_train
+            self.label_file_path_val = label_file_path_val
+            self.label_mapping_path = label_mapping_path
+
         self.labels_file_train = pd.read_csv(self.label_file_path_train)
         self.training_filenames = self.labels_file_train.paths.to_list()
 
-        self.label_file_path_val = label_file_path_val
         self.labels_file_val = pd.read_csv(self.label_file_path_val)
         self.validation_filenames = self.labels_file_val.paths.to_list()
         
-        self.label_mapping_path = label_mapping_path
-        
         self.bands = bands
-        self.bucket_name = bucket_name
 
         self.augment = augment
         self.random_flip_up_down = random_flip_up_down
@@ -112,6 +124,14 @@ class DataLoader:
 
         self.class_weight = self.generate_class_weight()
 
+
+    def read_s3_obj(self,s3_key):
+        s3 = self.s3
+        obj = s3.Object(self.bucket_name, s3_key)
+        obj_bytes = io.BytesIO(obj.get()['Body'].read())
+        return obj_bytes
+
+
     def build_training_dataset(self):
         self.training_dataset = tf.data.Dataset.from_tensor_slices(self.training_filenames)
 
@@ -138,13 +158,8 @@ class DataLoader:
                     num_parallel_calls=self.num_parallel_calls)
             print("Training on {} images ".format(len(self.training_filenames)))
 
-
         if self.enable_shuffle is True:
-            if self.shuffle_and_repeat is False:
-                self.training_dataset = self.training_dataset.shuffle(self.training_data_shuffle_buffer_size)
-            else:
-                self.logger.warning(
-                    ('Can not enable just shuffling of dataset because shuffle and repeat enabled'))
+            self.training_dataset = self.training_dataset.shuffle(self.training_data_shuffle_buffer_size)
 
         if self.training_data_batch_size is not None:
             self.training_dataset = self.training_dataset.batch(self.training_data_batch_size)
@@ -153,7 +168,7 @@ class DataLoader:
             self.training_dataset = self.training_dataset.prefetch(self.data_prefetch_size)
 
     def build_validation_dataset(self):
-        self.validation_dataset = tf.data.Dataset.from_tensor_slices(self.validation_filenames)
+        self.validation_dataset = tf.data.Dataset.from_tensor_slices(list(self.validation_filenames))
         self.validation_dataset = self.validation_dataset.map((lambda x: tf.py_function(self.process_path, [x], self.output_shape)), num_parallel_calls=self.num_parallel_calls)
 
         self.validation_dataset = self.validation_dataset.batch(self.training_data_batch_size)
@@ -161,9 +176,8 @@ class DataLoader:
 
         # self.validation_dataset = self.validation_dataset.prefetch(self.data_prefetch_size)
 
-
     def read_image(self, path_img):
-        s3 = boto3.resource('s3')
+        s3 = self.s3
         obj = s3.Object(self.bucket_name, path_img.numpy().decode())
         obj_bytes = io.BytesIO(obj.get()['Body'].read())
         with rasterio.open(obj_bytes) as src:
@@ -195,6 +209,7 @@ class DataLoader:
     def process_path_train_set_augment(self, file_path):
         label = self.get_label_from_csv(file_path)
         img = self.read_image(file_path)
+        # TODO no all augmentations at once
         # apply simple augmentations
         if self.random_flip_up_down is True:
             img = tf.image.random_flip_up_down(img)
@@ -215,19 +230,19 @@ class DataLoader:
 
         # generate class_weights dict to be used for class_weight attribute in model
     
-        df = pd.read_csv(self.label_file_path_train)
-
-        with open(self.label_mapping_path) as jsonfile:
-            data = json.load(jsonfile)
-            num_labels = len(data['label_names'].keys())
-
+        df = self.labels_file_train
+        if not self.s3_file_paths:
+            data = json.load(open(self.label_mapping_path))
+        else:
+            data = json.load(self.label_mapping_path)
+        num_labels = len(data['label_names'].keys())
         labels = {}
         no_label_class = []
         for column in df.columns[0:num_labels]:
             try:
                 col_count = df[column].value_counts()[1]
                 labels[column] = col_count
-            except: 
+            except:
                 no_label_class.append(column)
         
         print(f"Your training file is missing positive labels for classes {no_label_class}")
@@ -241,7 +256,6 @@ class DataLoader:
 
         return class_weight
 
-
 if __name__ == '__main__':
 
     args, _ = parse_args()
@@ -254,6 +268,7 @@ if __name__ == '__main__':
     gen = DataLoader(label_file_path_train=label_file_path_train,
                     label_file_path_val=label_file_path_val,
                     label_mapping_path=label_mapping_path,
+                    s3_file_paths=True,
                     bucket_name='canopy-production-ml',
                     data_extension_type='.tif',
                     training_data_shape=(100, 100, 18),
