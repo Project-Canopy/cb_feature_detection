@@ -19,6 +19,7 @@ class DataLoader:
     def __init__(self, label_file_path_train="labels_test_v1.csv",
                  label_file_path_val="labels_val.csv",
                  label_mapping_path="labels.json",
+                 s3_file_paths=True,
                  bucket_name='canopy-production-ml',
                  data_extension_type='.tif',
                  bands=['all'],
@@ -40,18 +41,29 @@ class DataLoader:
                  num_parallel_calls=2 * multiprocessing.cpu_count(),
                  output_shape=(tf.float32, tf.uint8)):
 
-        self.label_file_path_train = label_file_path_train
+        self.s3 = boto3.resource('s3')
+        self.bucket_name = bucket_name
+        self.s3_file_paths = s3_file_paths
+
+        if self.s3_file_paths:
+
+            self.label_file_path_train = self.read_s3_obj(label_file_path_train)
+            self.label_file_path_val = self.read_s3_obj(label_file_path_val)
+            self.label_mapping_path = self.read_s3_obj(label_mapping_path)
+
+        else:
+
+            self.label_file_path_train = label_file_path_train
+            self.label_file_path_val = label_file_path_val
+            self.label_mapping_path = label_mapping_path
+
         self.labels_file_train = pd.read_csv(self.label_file_path_train)
         self.training_filenames = self.labels_file_train.paths.to_list()
 
-        self.label_file_path_val = label_file_path_val
         self.labels_file_val = pd.read_csv(self.label_file_path_val)
         self.validation_filenames = self.labels_file_val.paths.to_list()
         
-        self.label_mapping_path = label_mapping_path
-        
         self.bands = bands
-        self.bucket_name = bucket_name
 
         self.augment = augment
         self.random_flip_up_down = random_flip_up_down
@@ -82,6 +94,14 @@ class DataLoader:
         self.build_validation_dataset()
 
         self.class_weight = self.generate_class_weight()
+
+
+    def read_s3_obj(self,s3_key):
+        s3 = self.s3
+        obj = s3.Object(self.bucket_name, s3_key)
+        obj_bytes = io.BytesIO(obj.get()['Body'].read())
+        return obj_bytes
+
 
     def build_training_dataset(self):
         self.training_dataset = tf.data.Dataset.from_tensor_slices(self.training_filenames)
@@ -128,7 +148,7 @@ class DataLoader:
         # self.validation_dataset = self.validation_dataset.prefetch(self.data_prefetch_size)
 
     def read_image(self, path_img):
-        s3 = boto3.resource('s3')
+        s3 = self.s3
         obj = s3.Object(self.bucket_name, path_img.numpy().decode())
         obj_bytes = io.BytesIO(obj.get()['Body'].read())
         with rasterio.open(obj_bytes) as src:
@@ -181,12 +201,12 @@ class DataLoader:
 
         # generate class_weights dict to be used for class_weight attribute in model
     
-        df = pd.read_csv(self.label_file_path_train)
-
-        with open(self.label_mapping_path) as jsonfile:
-            data = json.load(jsonfile)
-            num_labels = len(data['label_names'].keys())
-
+        df = self.labels_file_train
+        if not self.s3_file_paths:
+            data = json.load(open(self.label_mapping_path))
+        else:
+            data = json.load(self.label_mapping_path)
+        num_labels = len(data['label_names'].keys())
         labels = {}
         no_label_class = []
         for column in df.columns[0:num_labels]:
