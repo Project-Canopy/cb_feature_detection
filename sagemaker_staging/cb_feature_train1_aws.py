@@ -2,6 +2,7 @@ import os
 import multiprocessing
 import rasterio
 import tensorflow as tf
+from glob import glob
 import numpy as np
 import os
 from tensorflow.keras.models import *
@@ -160,7 +161,6 @@ class DataLoader:
         print("Validation on {} images ".format(len(self.validation_filenames)))
 
         # self.validation_dataset = self.validation_dataset.prefetch(self.data_prefetch_size)
-
 
     def read_image(self, path_img):
         s3 = boto3.resource('s3')
