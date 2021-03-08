@@ -59,6 +59,7 @@ class DataLoader:
             self.label_mapping_path = label_mapping_path
 
         self.labels_file_train = pd.read_csv(self.label_file_path_train)
+        self.labels_file_val = pd.read_csv(self.label_file_path_val)
         self.training_filenames = self.labels_file_train.paths.to_list()
 
         self.labels_file_val = pd.read_csv(self.label_file_path_val)
@@ -91,8 +92,8 @@ class DataLoader:
         self.training_data_type = training_data_type
         self.label_data_type = label_data_type
 
-        self.class_weight_train = self.generate_class_weight(self.label_file_path_train)
-        self.class_weight_val = self.generate_class_weight(self.label_file_path_val)
+        self.class_weight_train = self.generate_class_weight(self.label_file_path_train, self.labels_file_train)
+        self.class_weight_val = self.generate_class_weight(self.label_file_path_val, self.labels_file_val)
 
         self.build_training_dataset()
         self.build_validation_dataset()
@@ -204,11 +205,11 @@ class DataLoader:
 
         return img, label
 
-    def generate_class_weight(self, file_path):
+    def generate_class_weight(self, file_path, df):
 
         # generate class_weights dict to be used for class_weight attribute in model
 
-        df = self.labels_file_train
+        # df = self.labels_file_train
         if not self.s3_file_paths:
             data = json.load(open(self.label_mapping_path))
         else:
