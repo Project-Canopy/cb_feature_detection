@@ -158,7 +158,7 @@ class DataLoader:
                 lambda x: tf.py_function(self.process_path, [x], self.output_shape)),
                 num_parallel_calls=self.num_parallel_calls)
             self.length_training_dataset = len(self.training_filenames)
-            print(f"Training on {len(self.length_training_dataset)} images")
+            print(f"Training on {self.length_training_dataset} images")
 
         # Randomly shuffles the elements of this dataset.
         # This dataset fills a buffer with `buffer_size` elements, then randomly
@@ -285,7 +285,7 @@ if __name__ == '__main__':
                      s3_file_paths=False,
                      data_extension_type='.tif',
                      training_data_shape=(100, 100, 18),
-                     augment=True,
+                     augment=False,
                      flip_left_right=True,
                      flip_up_down=True,
                      rot90=True,
