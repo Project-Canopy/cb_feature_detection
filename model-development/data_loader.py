@@ -14,6 +14,9 @@ import json
 from tensorflow_addons.metrics import F1Score, HammingLoss
 from tensorflow_addons.losses import SigmoidFocalCrossEntropy
 import random
+from save_checkpoint_callback_custom import SaveCheckpoints
+import wandb
+from wandb.keras import WandbCallback
 
 class DataLoader:
     def __init__(self, label_file_path_train="labels_test_v1.csv",
@@ -349,32 +352,36 @@ if __name__ == '__main__':
         return model
 
     random_id = random.randint(1, 10001)
-    model_checkpoint_callback_loss = tf.keras.callbacks.ModelCheckpoint(
-        filepath=f'checkpoint_loss_{random_id}.h5',
-        format='h5',
-        verbose=1,
-        save_weights_only=True,
-        monitor='val_loss',
-        mode='min',
-        save_best_only=True)
-
-    model_checkpoint_callback_recall = tf.keras.callbacks.ModelCheckpoint(
-        filepath=f'checkpoint_recall_{random_id}.h5',
-        format='h5',
-        verbose=1,
-        save_weights_only=True,
-        monitor='val_recall',
-        mode='max',
-        save_best_only=True)
-
-    model_checkpoint_callback_precision = tf.keras.callbacks.ModelCheckpoint(
-        filepath=f'checkpoint_precision_{random_id}.h5',
-        format='h5',
-        verbose=1,
-        save_weights_only=True,
-        monitor='val_precision',
-        mode='max',
-        save_best_only=True)
+    wandb.init(project='project_canopy', sync_tensorboard=True)
+    config = wandb.config
+    base_name_checkpoint = "model_resnet"
+    save_checkpoint_wandb = SaveCheckpoints(base_name_checkpoint)
+    # model_checkpoint_callback_loss = tf.keras.callbacks.ModelCheckpoint(
+    #     filepath=f'checkpoint_loss_{random_id}.h5',
+    #     format='h5',
+    #     verbose=1,
+    #     save_weights_only=True,
+    #     monitor='val_loss',
+    #     mode='min',
+    #     save_best_only=True)
+    #
+    # model_checkpoint_callback_recall = tf.keras.callbacks.ModelCheckpoint(
+    #     filepath=f'checkpoint_recall_{random_id}.h5',
+    #     format='h5',
+    #     verbose=1,
+    #     save_weights_only=True,
+    #     monitor='val_recall',
+    #     mode='max',
+    #     save_best_only=True)
+    #
+    # model_checkpoint_callback_precision = tf.keras.callbacks.ModelCheckpoint(
+    #     filepath=f'checkpoint_precision_{random_id}.h5',
+    #     format='h5',
+    #     verbose=1,
+    #     save_weights_only=True,
+    #     monitor='val_precision',
+    #     mode='max',
+    #     save_best_only=True)
 
     # reducelronplateau = tf.keras.callbacks.ReduceLROnPlateau(
     #   monitor='val_loss', factor=0.1, patience=5, verbose=1,
@@ -382,8 +389,7 @@ if __name__ == '__main__':
 
     early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_precision', mode='max', patience=20, verbose=1)
 
-    callbacks_list = [model_checkpoint_callback_loss, model_checkpoint_callback_recall,
-                      model_checkpoint_callback_precision, early_stop]
+    callbacks_list = [save_checkpoint_wandb, early_stop]
 
     model = define_model(10, (100,100,18))
 
@@ -403,7 +409,7 @@ if __name__ == '__main__':
                   )
 
     # model = Simple_CNN(10, input_shape=(100, 100, 18))
-    epochs = 10
+    epochs = 2
     history = model.fit(gen.training_dataset, validation_data=gen.validation_dataset,
                         epochs=epochs,
                         callbacks=callbacks_list,
