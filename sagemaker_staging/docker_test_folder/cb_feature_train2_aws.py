@@ -24,7 +24,7 @@ def parse_args():
 
     # hyperparameters sent by the client are passed as command-line arguments to the script
     parser.add_argument('--epochs', type=int, default=1)
-    #parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--wandb_key', type=str)
 
     
@@ -38,6 +38,8 @@ def parse_args():
     parser.add_argument('--data', type=str, default=os.environ.get('SM_CHANNEL_DATA'))
     parser.add_argument('--s3_chkpt_dir', type=str)
     parser.add_argument('--output', type=str, default="/opt/ml/output")
+    parser.add_argument('--job_name', 
+                        type=str, default=json.loads(os.environ.get('SM_TRAINING_ENV'))["job_name"])
 #     parser.add_argument('--train', type=str, default=os.environ.get('SM_CHANNEL_TRAIN'))
 #     parser.add_argument('--val', type=str, default=os.environ.get('SM_CHANNEL_VAL'))
 #     parser.add_argument('--labels', type=str, default=os.environ.get('SM_CHANNEL_VAL'))
@@ -51,6 +53,13 @@ def parse_args():
     
     
     return parser.parse_known_args()
+
+    
+def check_gpu():
+    if tf.test.gpu_device_name():
+        print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
+    else:
+        print("Please install GPU version of TF")
 
 
 class DataLoader:
@@ -329,6 +338,7 @@ class SaveCheckpoints(keras.callbacks.Callback):
         self.s3_chkpt_dir = s3_chkpt_dir
 
     def on_epoch_end(self, epoch, logs={}):
+        epoch = epoch + 1 
         print(f'\nEpoch {epoch} saving checkpoint')
         model_name = f'{self.base_name_checkpoint}_epoch_{epoch}.h5'
         local_path =  self.lcl_chkpt_dir + "/" + model_name
@@ -337,32 +347,30 @@ class SaveCheckpoints(keras.callbacks.Callback):
         s3 = boto3.resource('s3')
         BUCKET = "canopy-production-ml-output"
         s3.Bucket(BUCKET).upload_file(local_path, s3_path)
+        
 
 if __name__ == '__main__':
 
-    local_test = False
 
+    local_test = False
+    
+    check_gpu()
+    
     args, _ = parse_args()
     
-    print(args)
-    
     wandb_key = args.wandb_key
-    
     os.environ["WANDB_API_KEY"]=wandb_key
-
     wandb.init(project='project_canopy', tensorboard=True)
-
     config = wandb.config
     
+    job_name = args.job_name
     data_dir = args.data
-    
     lcl_chkpt_dir = args.model_dir
-
     s3_chkpt_base_dir = args.s3_chkpt_dir
-    
     epochs = args.epochs
+    batch_size=args.batch_size
 
-    files = ['labels_test_v1.csv','val_labels.csv','labels.json']
+    files = ["labels_train.csv","labels_val.csv","labels.json"]
 
 
     if local_test:
@@ -376,14 +384,14 @@ if __name__ == '__main__':
 
     else:
 
-        label_file_path_train = os.path.join(data_dir, 'labels_test_v1.csv')
-        label_file_path_val = os.path.join(data_dir,'val_labels.csv')
-        label_mapping_path = os.path.join(data_dir,'labels.json')
+        label_file_path_train = os.path.join(data_dir, files[0])
+        label_file_path_val = os.path.join(data_dir,files[1])
+        label_mapping_path = os.path.join(data_dir,files[2])
 
     
     
     # Variables definition
-    config.batch_size = 20
+    config.batch_size = batch_size
     config.learning_rate = 0.001
     config.label_file_path_train=label_file_path_train # labels_1_4_train_v2
     config.label_file_path_val=label_file_path_val
@@ -458,8 +466,9 @@ if __name__ == '__main__':
     #     model.summary()
         return model
     
-    random_id = random.randint(1,10001)
-    s3_chkpt_dir = s3_chkpt_base_dir + "/" + str(random_id)   
+#     random_id = random.randint(1,10001)
+
+    s3_chkpt_dir = s3_chkpt_base_dir + "/" + job_name   
     base_name_checkpoint = "model_resnet"
     save_checkpoint_s3 = SaveCheckpoints(base_name_checkpoint,lcl_chkpt_dir,s3_chkpt_dir)
 
