@@ -23,7 +23,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     # hyperparameters sent by the client are passed as command-line arguments to the script
-    #parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--epochs', type=int, default=1)
     #parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--wandb_key', type=str)
 
@@ -36,16 +36,18 @@ def parse_args():
     
     # data directories
     parser.add_argument('--data', type=str, default=os.environ.get('SM_CHANNEL_DATA'))
+    parser.add_argument('--s3_chkpt_dir', type=str)
     #parser.add_argument('--output', type=str, default=os.environ.get('SM_CHANNEL_OUTPUT'))
 #     parser.add_argument('--train', type=str, default=os.environ.get('SM_CHANNEL_TRAIN'))
 #     parser.add_argument('--val', type=str, default=os.environ.get('SM_CHANNEL_VAL'))
 #     parser.add_argument('--labels', type=str, default=os.environ.get('SM_CHANNEL_VAL'))
+
     
     # embedding directory
     #parser.add_argument('--embedding', type=str, default=os.environ.get('SM_CHANNEL_EMBEDDING'))
     
     # model directory: we will use the default set by SageMaker, /opt/ml/model
-    #parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR'))
+    parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR'))
     
     return parser.parse_known_args()
 
@@ -312,15 +314,54 @@ class DataLoader:
 
         return class_weight
 
+class SaveCheckpoints(keras.callbacks.Callback):
+    epoch_save_list = None
+    checkpoints_dir = None
+
+    def __init__(self, 
+                base_name_checkpoint=None,
+                lcl_chkpt_dir=None,
+                s3_chkpt_dir=None):
+
+        self.base_name_checkpoint = base_name_checkpoint # s3 ?
+        self.lcl_chkpt_dir = lcl_chkpt_dir 
+        self.s3_chkpt_dir = s3_chkpt_dir
+
+    def on_epoch_end(self, epoch, logs={}):
+        print(f'\nEpoch {epoch} saving checkpoint')
+        model_name = f'{self.base_name_checkpoint}_epoch_{epoch}.h5'
+        local_path =  self.lcl_chkpt_dir + "/" + model_name
+        s3_path = self.s3_chkpt_dir + "/" + model_name
+        self.model.save_weights(local_path, save_format='h5')
+        s3 = boto3.resource('s3')
+        BUCKET = "canopy-production-ml-output"
+        s3.Bucket(BUCKET).upload_file(local_path, s3_path)
+
 if __name__ == '__main__':
 
     local_test = True
 
     args, _ = parse_args()
+
+    print(args)
     
     wandb_key = args.wandb_key
-    
+
     os.environ["WANDB_API_KEY"]=wandb_key
+
+    wandb.init(project='project_canopy', tensorboard=True)
+
+    config = wandb.config
+    
+    data_dir = args.data
+    
+    checkpoints_dir = args.model_dir
+
+    s3_chkpt_base_dir = args.s3_chkpt_dir
+    
+    epochs = args.epochs
+
+    files = ['labels_test_v1.csv','val_labels.csv','labels.json']
     
     data_dir = args.data
 
@@ -333,14 +374,13 @@ if __name__ == '__main__':
         label_file_path_train = base_path + files[0]
         label_file_path_val = base_path + files[1]
         label_mapping_path = base_path + files[2]
+        lcl_chkpt_dir = "./checkpoints"
 
     else:
 
         label_file_path_train = os.path.join(data_dir, 'labels_test_v1.csv')
         label_file_path_val = os.path.join(data_dir,'val_labels.csv')
         label_mapping_path = os.path.join(data_dir,'labels.json')
-
-
 
     
     
@@ -420,11 +460,10 @@ if __name__ == '__main__':
     #     model.summary()
         return model
     
-    random_id = random.randint(1,10001) 
-    wandb.init(project='project_canopy', tensorboard=True)
-    config = wandb.config    
+    random_id = random.randint(1,10001)
+    s3_chkpt_dir = s3_chkpt_base_dir + "/" + str(random_id)   
     base_name_checkpoint = "model_resnet"
-    save_checkpoint_wandb = SaveCheckpoints(base_name_checkpoint)
+    save_checkpoint_s3 = SaveCheckpoints(base_name_checkpoint,lcl_chkpt_dir,s3_chkpt_dir)
 
 
     # model_checkpoint_callback_loss = tf.keras.callbacks.ModelCheckpoint(
@@ -461,7 +500,7 @@ if __name__ == '__main__':
     early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_precision', mode='max', patience=20, verbose=1)
 
     wandb_callback = WandbCallback()
-    callbacks_list = [ early_stop, wandb_callback] #TODO re add reducelronplateau
+    callbacks_list = [save_checkpoint_s3, early_stop, wandb_callback] #TODO re add reducelronplateau
 
     model = define_model(config.numclasses, config.input_shape)
 
@@ -477,13 +516,12 @@ if __name__ == '__main__':
     #               sample_weight_mode="temporal" # This argument is not supported when x is a dataset or a dataset iterator, instead pass sample weights as the third element of x.
                  )
     
-    epochs = 10
+    epochs = epochs
     history = model.fit(gen.training_dataset, validation_data=gen.validation_dataset, 
                         epochs=epochs, 
                         callbacks=callbacks_list,
                         shuffle=True # whether to shuffle the training data before each epoch
                        ) 
-
 
 
     

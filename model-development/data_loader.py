@@ -282,15 +282,17 @@ class DataLoader:
         return class_weight
 
     class SaveCheckpoints(keras.callbacks.Callback):
+
         epoch_save_list = None
         checkpoints_dir = None
 
         def __init__(self, base_name_checkpoint):
             self.base_name_checkpoint = base_name_checkpoint # s3 ?
+            print("base_name_checkpoint:",self.base_name_checkpoint)
 
         def on_epoch_end(self, epoch, logs={}):
             print(f'\nEpoch {epoch} saving checkpoint')
-            model_name = f'{self.base_name_checkpoint}-epoch{epoch}.h5'
+            model_name = f'{self.base_name_checkpoint}_epoch_{epoch}.h5'
             self.model.save_weights(model_name, save_format='h5')
             s3 = boto3.resource('s3')
             BUCKET = "canopy-production-ml-output"
