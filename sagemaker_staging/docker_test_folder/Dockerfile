@@ -1,6 +1,5 @@
 FROM 763104351884.dkr.ecr.us-east-1.amazonaws.com/tensorflow-training:2.4.1-gpu-py37-cu110-ubuntu18.04
 
-
 ENV PATH="/opt/ml/code:${PATH}"
 
 # Install rasterio for reading TIFF files in TF Image Loader

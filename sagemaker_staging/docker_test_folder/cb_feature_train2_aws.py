@@ -24,7 +24,7 @@ def parse_args():
 
     # hyperparameters sent by the client are passed as command-line arguments to the script
     parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--batch_size', type=int, default=20)
     parser.add_argument('--wandb_key', type=str)
 
     
@@ -205,7 +205,7 @@ class DataLoader:
                 lambda x: tf.py_function(self.process_path, [x], self.output_shape)),
                 num_parallel_calls=self.num_parallel_calls)
             self.length_training_dataset = len(self.training_filenames)
-            print(f"Training on {len(self.length_training_dataset)} images")
+            print(f"Training on {self.length_training_dataset} images")
 
         # Randomly shuffles the elements of this dataset.
         # This dataset fills a buffer with `buffer_size` elements, then randomly
@@ -461,6 +461,9 @@ if __name__ == '__main__':
 
         # this is the model we will train
         model = Model(inputs=base_model.input, outputs=predictions)
+        
+        #model.load_weights(h5_path) #TODO
+        
     #     model = model.layers[-1].bias.assign([0.0]) # WIP getting an error ValueError: Cannot assign to variable dense_8/bias:0 due to variable shape (10,) and value shape (1,) are incompatible
 
     #     model.summary()
