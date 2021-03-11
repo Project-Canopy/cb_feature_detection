@@ -6,6 +6,7 @@ import numpy as np
 from tensorflow.keras.models import *
 from tensorflow.keras.layers import *
 from tensorflow.keras import layers
+import tensorflow.keras as keras
 import keras
 import pandas as pd
 import boto3
@@ -287,6 +288,23 @@ class DataLoader:
             class_weight[int(label_name)] = (1 / labels[label_name]) * (labels_sum) / keys_len
 
         return class_weight
+
+    class SaveCheckpoints(keras.callbacks.Callback):
+
+        epoch_save_list = None
+        checkpoints_dir = None
+
+        def __init__(self, base_name_checkpoint):
+            self.base_name_checkpoint = base_name_checkpoint # s3 ?
+            print("base_name_checkpoint:",self.base_name_checkpoint)
+
+        def on_epoch_end(self, epoch, logs={}):
+            print(f'\nEpoch {epoch} saving checkpoint')
+            model_name = f'{self.base_name_checkpoint}_epoch_{epoch}.h5'
+            self.model.save_weights(model_name, save_format='h5')
+            s3 = boto3.resource('s3')
+            BUCKET = "canopy-production-ml-output"
+            s3.Bucket(BUCKET).upload_file(model_name, "ckpt/" + model_name)
 
 
 if __name__ == '__main__':

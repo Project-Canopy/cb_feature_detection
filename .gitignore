@@ -138,4 +138,5 @@ data-prep/yes_chips_s3.json
 # wandb
 
 model-development/wandb/
+sagemaker_staging/docker_test_folder/wandb/
 
