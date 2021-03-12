@@ -6,7 +6,8 @@ ENV PATH="/opt/ml/code:${PATH}"
 RUN pip3 install rasterio wandb tensorflow-addons
 
 # Copies the training code inside the container
-COPY cb_feature_train2_aws.py /opt/ml/code/train.py
- 
+COPY cb_feature_train3_aws.py /opt/ml/code/train.py
+COPY data_loader.py /opt/ml/code/data_loader.py
+
 # Defines train.py as script entrypoint
 ENV SAGEMAKER_PROGRAM train.py

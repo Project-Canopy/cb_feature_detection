@@ -18,6 +18,7 @@ import random
 from save_checkpoint_callback_custom import SaveCheckpoints
 import wandb
 from wandb.keras import WandbCallback
+from rasterio.session import AWSSession
 
 class DataLoader:
     def __init__(self, label_file_path_train="labels_test_v1.csv",
@@ -197,18 +198,25 @@ class DataLoader:
         print(f"Validation on {len(self.validation_filenames)} images ")
 
     def read_image(self, path_img):
-        s3 = self.s3
-        # path_img is a tf.string and needs to be converted into a string using .numpy().decode()
-        obj = s3.Object(self.bucket_name, path_img.numpy().decode())
-        obj_bytes = io.BytesIO(obj.get()['Body'].read())
-        with rasterio.open(obj_bytes) as src:
-            if self.bands == ['all']:
-                # Need to transpose the image to have the channels last and not first as rasterio read the image
-                # The input for the model is width*height*channels
-                train_img = np.transpose(src.read(), (1, 2, 0))
-            else:
-                train_img = np.transpose(src.read(self.bands), (1, 2, 0))
-        # Normalize image
+        output_session = boto3.Session()
+        aws_session = AWSSession(output_session)
+        rasterio_env = rasterio.Env(
+            session=aws_session,
+            GDAL_DISABLE_READDIR_ON_OPEN='NO',
+            CPL_VSIL_CURL_USE_HEAD='NO',
+            GDAL_GEOREF_SOURCES='INTERNAL',
+            GDAL_TIFF_INTERNAL_MASK='NO'
+        )
+        with rasterio_env as env:
+            path_to_s3_img = "s3://" + self.bucket_name + "/" + path_img.numpy().decode()
+            with rasterio.open(path_to_s3_img, mode='r', sharing=False, GEOREF_SOURCES='INTERNAL') as src:
+                if self.bands == ['all']:
+                    # Need to transpose the image to have the channels last and not first as rasterio read the image
+                    # The input for the model is width*height*channels
+                    train_img = np.transpose(src.read(), (1, 2, 0))
+                else:
+                    train_img = np.transpose(src.read(self.bands), (1, 2, 0))
+            # Normalize image
         train_img = tf.image.convert_image_dtype(train_img, tf.float32)
         return train_img
 
@@ -282,15 +290,17 @@ class DataLoader:
         return class_weight
 
     class SaveCheckpoints(keras.callbacks.Callback):
+
         epoch_save_list = None
         checkpoints_dir = None
 
         def __init__(self, base_name_checkpoint):
             self.base_name_checkpoint = base_name_checkpoint # s3 ?
+            print("base_name_checkpoint:",self.base_name_checkpoint)
 
         def on_epoch_end(self, epoch, logs={}):
             print(f'\nEpoch {epoch} saving checkpoint')
-            model_name = f'{self.base_name_checkpoint}-epoch{epoch}.h5'
+            model_name = f'{self.base_name_checkpoint}_epoch_{epoch}.h5'
             self.model.save_weights(model_name, save_format='h5')
             s3 = boto3.resource('s3')
             BUCKET = "canopy-production-ml-output"
