@@ -19,7 +19,7 @@ import multiprocessing
 import time
 
 print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
-subprocess.call([sys.executable, "nvidia-smi"])
+# subprocess.call([sys.executable, "-m", "nvidia-smi"])
 
 # Script mode doesn't support requirements.txt
 # Here's the workaround:
@@ -53,6 +53,8 @@ class DataLoader:
         self.label_file_path_train = label_file_path_train
         self.label_file_path_val = label_file_path_val
 
+        print(f"label_file_path_train: {self.label_file_path_train}")
+        print(f"labels_file_val: {self.label_file_path_val}")
         self.labels_file_train = pd.read_csv(self.label_file_path_train)
         self.labels_file_val = pd.read_csv(self.label_file_path_val)
         self.training_filenames = self.labels_file_train.paths.to_list()
@@ -97,59 +99,71 @@ class DataLoader:
 
         # If data augmentation
         if self.augment is True:
+            # https://stackoverflow.com/questions/61760235/data-augmentation-on-tf-dataset-dataset
             print(f"Data augmentation enabled: flip_up_down {self.flip_up_down}, "
                   f"flip_left_right {self.flip_left_right}, rot90 {self.rot90}")
-            datasets = []  # list of all datasets to be combined into the training dataset
-            # data_augmentations=1 because even without data augmentation we need the dataset once (read more about repeat function for this)
-            data_augmentations = 1
-
-            # Original dataset. No augmentation performed here
-            # tf.py_function: Wraps a python function into a TensorFlow op that executes it eagerly,
-            # This function allows expressing computations in a TensorFlow graph as Python functions
-            self.training_dataset_non_augmented = self.training_dataset.map((
+            
+            self.training_dataset = self.training_dataset.map((
                 lambda x: tf.py_function(self.process_path, [x], self.output_shape)),
-                num_parallel_calls=self.num_parallel_calls)
-            datasets.append(self.training_dataset_non_augmented)
+                num_parallel_calls=self.num_parallel_calls).cache(
+            ).map(
+            lambda image, label: (tf.image.random_flip_left_right(image), label)
+            ).map(
+            lambda image, label: (tf.image.random_flip_up_down(image), label)
+            ).repeat(3)
+            
+#             datasets = []  # list of all datasets to be combined into the training dataset
+#             # data_augmentations=1 because even without data augmentation we need the dataset once (read more about repeat function for this)
+#             data_augmentations = 1
 
-            ### Below are the data augmentations that use the original images
-            # Outputs the contents of `image` flipped along the width dimension
-            if self.flip_left_right is True:
-                self.training_dataset_augmented_flip_left_right = self.training_dataset.map((
-                    lambda x: tf.py_function(self.process_path_train_set_augment_flip_left_right, [x],
-                                             self.output_shape)),
-                    num_parallel_calls=self.num_parallel_calls)
-                datasets.append(self.training_dataset_augmented_flip_left_right)
-                data_augmentations = data_augmentations + 1
+#             # Original dataset. No augmentation performed here
+#             # tf.py_function: Wraps a python function into a TensorFlow op that executes it eagerly,
+#             # This function allows expressing computations in a TensorFlow graph as Python functions
+#             self.training_dataset_non_augmented = self.training_dataset.map((
+#                 lambda x: tf.py_function(self.process_path, [x], self.output_shape)),
+#                 num_parallel_calls=self.num_parallel_calls)
+#             datasets.append(self.training_dataset_non_augmented)
 
-            # Outputs the contents of `image` flipped along the height dimension
-            if self.flip_up_down is True:
-                self.training_dataset_augmented_flip_up_down = self.training_dataset.map((
-                    lambda x: tf.py_function(self.process_path_train_set_augment_flip_up_down, [x], self.output_shape)),
-                    num_parallel_calls=self.num_parallel_calls)
-                datasets.append(self.training_dataset_augmented_flip_up_down)
-                data_augmentations = data_augmentations + 1
+#             ### Below are the data augmentations that use the original images
+#             # Outputs the contents of `image` flipped along the width dimension
+#             if self.flip_left_right is True:
+#                 self.training_dataset_augmented_flip_left_right = self.training_dataset.map((
+#                     lambda x: tf.py_function(self.process_path_train_set_augment_flip_left_right, [x],
+#                                              self.output_shape)),
+#                     num_parallel_calls=self.num_parallel_calls)
+#                 datasets.append(self.training_dataset_augmented_flip_left_right)
+#                 data_augmentations = data_augmentations + 1
 
-            # Rotate image(s) counter-clockwise by 90 degrees
-            if self.rot90 is True:
-                self.training_dataset_augmented_rot90 = self.training_dataset.map((
-                    lambda x: tf.py_function(self.process_path_train_set_augment_rot90, [x], self.output_shape)),
-                    num_parallel_calls=self.num_parallel_calls)
-                datasets.append(self.training_dataset_augmented_rot90)
-                data_augmentations = data_augmentations + 1
+#             # Outputs the contents of `image` flipped along the height dimension
+#             if self.flip_up_down is True:
+#                 self.training_dataset_augmented_flip_up_down = self.training_dataset.map((
+#                     lambda x: tf.py_function(self.process_path_train_set_augment_flip_up_down, [x], self.output_shape)),
+#                     num_parallel_calls=self.num_parallel_calls)
+#                 datasets.append(self.training_dataset_augmented_flip_up_down)
+#                 data_augmentations = data_augmentations + 1
 
-            # Define a dataset containing `[0, 1, 0, 1, 0, 1, ..., 0, 1]` if data_augmentations = 1 for example
-            # This line of code basically makes it possible to "repeat" the original dataset with augmentations
-            choice_dataset = tf.data.Dataset.range(data_augmentations).repeat(len(self.training_filenames))
+#             # Rotate image(s) counter-clockwise by 90 degrees
+#             if self.rot90 is True:
+#                 self.training_dataset_augmented_rot90 = self.training_dataset.map((
+#                     lambda x: tf.py_function(self.process_path_train_set_augment_rot90, [x], self.output_shape)),
+#                     num_parallel_calls=self.num_parallel_calls)
+#                 datasets.append(self.training_dataset_augmented_rot90)
+#                 data_augmentations = data_augmentations + 1
 
-            # TODO to some performance testing on the choose_from_datasets duplication augmentation method done above
-            self.training_dataset = tf.data.experimental.choose_from_datasets(datasets, choice_dataset)
-            self.length_training_dataset = len(self.training_filenames) * len(datasets)
+#             # Define a dataset containing `[0, 1, 0, 1, 0, 1, ..., 0, 1]` if data_augmentations = 1 for example
+#             # This line of code basically makes it possible to "repeat" the original dataset with augmentations
+#             choice_dataset = tf.data.Dataset.range(data_augmentations).repeat(len(self.training_filenames))
+
+#             # TODO to some performance testing on the choose_from_datasets duplication augmentation method done above
+#             self.training_dataset = tf.data.experimental.choose_from_datasets(datasets, choice_dataset)
+#             self.length_training_dataset = len(self.training_filenames) * len(datasets)
+            self.length_training_dataset = len(self.training_filenames) * 3
             print(f"Training on {self.length_training_dataset} images")
         else:
             print("No data augmentation. Please set augment to True if you want to augment training dataset")
             self.training_dataset = self.training_dataset.map((
                 lambda x: tf.py_function(self.process_path, [x], self.output_shape)),
-                num_parallel_calls=self.num_parallel_calls)
+                num_parallel_calls=self.num_parallel_calls).cache()
             self.length_training_dataset = len(self.training_filenames)
             print(f"Training on {self.length_training_dataset} images")
 
@@ -326,7 +340,7 @@ if __name__ == '__main__':
     if args.augment.lower() == "false":
         augmentation_data = False
     else:
-        args.augment = True
+        augmentation_data = True
     if args.flip_left_right.lower() == "false":
         aug_flip_left_right = False
     else:
@@ -339,8 +353,7 @@ if __name__ == '__main__':
         aug_rot90 = False
     else:
         aug_rot90 = True
-    print(f"lr: {lr}, batch_size: {batch_size}, augmentation_data: {augmentation_data} " + 
-          f"aug_flip_left_right {aug_flip_left_right}, aug_flip_up_down {aug_flip_up_down}, aug_rot90: {aug_rot90}")
+    print(f"lr: {lr}, batch_size: {batch_size}, augmentation_data: {augmentation_data}")
     
     bands = args.bands.split(" ")
     bands = list(map(int, bands))   # convert to int
@@ -350,7 +363,7 @@ if __name__ == '__main__':
 
     numclasses = int(args.numclasses)
 
-#     gpu_count = args.gpu_count
+    gpu_count = args.gpu_count
     model_dir = args.model_dir
     training_dir = args.training
     validation_dir = args.validation
@@ -406,7 +419,7 @@ if __name__ == '__main__':
         model = Model(inputs=base_model.input, outputs=predictions)
         #     model = model.layers[-1].bias.assign([0.0]) # WIP getting an error ValueError: Cannot assign to variable dense_8/bias:0 due to variable shape (10,) and value shape (1,) are incompatible
 
-        # model.summary()
+        model.summary()
         return model
 
 
@@ -418,11 +431,31 @@ if __name__ == '__main__':
 
     callbacks_list = [save_checkpoint_wandb, early_stop, WandbCallback()]
 
-    mirrored_strategy = tf.distribute.MirroredStrategy(devices=["/gpu:0", "/gpu:1", "/gpu:2", "/gpu:3","/gpu:4", "/gpu:5", "/gpu:6", "/gpu:7"])
+    if gpu_count > 0:
+        list_gpus = []
+        for gpu in range(0, gpu_count):
+            list_gpus.append(f"/gpu:{gpu}")
+            mirrored_strategy = tf.distribute.MirroredStrategy(devices=list_gpus)
 
-    with mirrored_strategy.scope():
+            with mirrored_strategy.scope():
+                model = define_model(numclasses, input_shape)
+
+                # loss=tf.keras.losses.BinaryCrossentropy(from_logits=False), # Computes the cross-entropy loss between true labels and predicted labels.
+                # Focal loss instead of class weights: https://www.dlology.com/blog/multi-class-classification-with-focal-loss-for-imbalanced-datasets/
+                model.compile(loss=SigmoidFocalCrossEntropy(),
+                              # https://www.tensorflow.org/addons/api_docs/python/tfa/losses/SigmoidFocalCrossEntropy
+                              optimizer=keras.optimizers.Adam(lr),
+                              metrics=[tf.metrics.BinaryAccuracy(name='accuracy'),
+                                       tf.keras.metrics.Precision(name='precision'),
+                                       # Computes the precision of the predictions with respect to the labels.
+                                       tf.keras.metrics.Recall(name='recall'),
+                                       # Computes the recall of the predictions with respect to the labels.
+                                       F1Score(num_classes=numclasses, name="f1_score")
+                                       # https://www.tensorflow.org/addons/api_docs/python/tfa/metrics/F1Score
+                                       ]
+                              )
+    else:
         model = define_model(numclasses, input_shape)
-
         # loss=tf.keras.losses.BinaryCrossentropy(from_logits=False), # Computes the cross-entropy loss between true labels and predicted labels.
         # Focal loss instead of class weights: https://www.dlology.com/blog/multi-class-classification-with-focal-loss-for-imbalanced-datasets/
         model.compile(loss=SigmoidFocalCrossEntropy(),
