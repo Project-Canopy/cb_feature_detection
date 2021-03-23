@@ -20,6 +20,17 @@ from tensorflow_addons.losses import SigmoidFocalCrossEntropy
 
 from data_loader import DataLoader
 
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def parse_args():
     
     parser = argparse.ArgumentParser()
@@ -29,7 +40,7 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--wandb_key', type=str)
 
-    parser.add_argument('--bands', nargs='+', default=[1,2,3,4,5,6,7,8,9,10,11,12,16,17,18])
+    parser.add_argument('--bands', help='delimited list input', type=str, default='1,2,3,4,5,6,7,8,9,10,11,12,16,17,18')
     #parser.add_argument('--num_words', type=int)
     #parser.add_argument('--word_index_len', type=int)
     #parser.add_argument('--labels_index_len', type=int)
@@ -53,6 +64,11 @@ def parse_args():
     parser.add_argument('--model_dir', type=str, default=os.environ.get('SM_MODEL_DIR'))
 
     parser.add_argument('--starting_checkpoint', type=str, default=None)
+    
+    parser.add_argument('--augment', type=str2bool, default=True)
+    parser.add_argument('--flip_left_right', type=str2bool, default=True)
+    parser.add_argument('--flip_up_down', type=str2bool, default=True)
+    parser.add_argument('--rot90', type=str2bool, default=True)
     
     return parser.parse_known_args()
 
@@ -87,8 +103,11 @@ class SaveCheckpoints(keras.callbacks.Callback):
         s3 = boto3.resource('s3')
         BUCKET = "canopy-production-ml-output"
         s3.Bucket(BUCKET).upload_file(local_path, s3_path)
-        last_chkpt_path = self.lcl_chkpt_dir + "/" + "last_chkpt.h5"
+        last_chkpt_filename = "last_chkpt.h5"
+        last_chkpt_path = self.lcl_chkpt_dir + "/" + last_chkpt_filename
         self.model.save_weights(last_chkpt_path, save_format='h5')
+        s3_path = self.s3_chkpt_dir + "/" + last_chkpt_filename
+        s3.Bucket(BUCKET).upload_file(last_chkpt_path, s3_path)
         
 
 if __name__ == '__main__':
@@ -111,8 +130,9 @@ if __name__ == '__main__':
     s3_chkpt_base_dir = args.s3_chkpt_dir
     epochs = args.epochs
     batch_size=args.batch_size
-    bands = args.bands
+    bands = [int(band) for band in args.bands.split(',')]
     starting_checkpoint = args.starting_checkpoint
+    print('Starting checkpoint:', starting_checkpoint)
     
     if not os.path.exists(lcl_chkpt_dir):
         os.mkdir(lcl_chkpt_dir)
@@ -136,7 +156,6 @@ if __name__ == '__main__':
         label_mapping_path = os.path.join(data_dir,files[2])
 
     
-    
     # Variables definition
     config.batch_size = batch_size
     config.learning_rate = 0.001
@@ -146,15 +165,16 @@ if __name__ == '__main__':
     config.optimizer = keras.optimizers.Adam(config.learning_rate)
     config.input_shape = (100, 100, len(bands))
     config.numclasses=10
-
-    config.augment = True
+    
     config.random_flip_up_down=False
     config.random_flip_left_right=False
-    config.flip_left_right=True
-    config.flip_up_down=True
-    config.rot90=True
     config.transpose=False
     config.enable_shuffle=True
+    
+#     config.augment = augment
+#     config.flip_left_right = flip_left_right
+#     config.flip_up_down = flip_up_down
+#     config.rot90 = rot90
 
     print(f"batch size {config.batch_size}, learning_rate {config.learning_rate}, augment {config.augment}")
     
@@ -212,11 +232,18 @@ if __name__ == '__main__':
     #     model = model.layers[-1].bias.assign([0.0]) # WIP getting an error ValueError: Cannot assign to variable dense_8/bias:0 due to variable shape (10,) and value shape (1,) are incompatible
 
     #     model.summary()
-        if starting_checkpoint:
-            s3 = boto3.resource('s3')
+        last_chkpt_path = lcl_chkpt_dir + 'last_chkpt.h5'
+        if os.path.exists(last_chkpt_path):
+            print('New spot instance; loading previous checkpoint')
+            model.load_weights(last_chkpt_path)
+        elif starting_checkpoint:
+            print('No previous checkpoint found in opt/ml/checkpoints directory; loading checkpoint from', starting_checkpoint)
+            s3 = boto3.client('s3')
             chkpt_name = lcl_chkpt_dir + '/' + 'start_chkpt.h5'
             s3.download_file('canopy-production-ml-output', starting_checkpoint, chkpt_name)
             model.load_weights(chkpt_name)
+        else:
+            print('No previous checkpoint found in opt/ml/checkpoints directory; start training from scratch')
     
         return model
     
