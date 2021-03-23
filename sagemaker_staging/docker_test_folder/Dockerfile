@@ -5,9 +5,10 @@ ENV PATH="/opt/ml/code:${PATH}"
 # Install rasterio for reading TIFF files in TF Image Loader
 RUN pip3 install rasterio wandb tensorflow-addons
 
+
 # Copies the training code inside the container
-COPY cb_feature_train3_aws.py /opt/ml/code/train.py
-COPY data_loader.py /opt/ml/code/data_loader.py
+COPY cb_feature_train4_aws.py /opt/ml/code/train.py
+COPY data_loader_2.py /opt/ml/code/data_loader.py
 
 # Defines train.py as script entrypoint
 ENV SAGEMAKER_PROGRAM train.py
