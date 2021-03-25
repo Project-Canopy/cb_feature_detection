@@ -192,6 +192,7 @@ class SaveCheckpoints(keras.callbacks.Callback):
         self.model.save_weights(last_chkpt_path, save_format='h5')
         s3_path = self.s3_chkpt_dir + "/" + last_chkpt_filename
         s3.Bucket(BUCKET).upload_file(last_chkpt_path, s3_path)
+        
 
 
 if __name__ == '__main__':
@@ -248,7 +249,7 @@ if __name__ == '__main__':
 
     os.environ["WANDB_API_KEY"] = args.wandb_key   # "6607ed7a49b452c2f3494ce60f9514f6c9e3b4e6"
     wandb.init(project='project-canopy')  # , sync_tensorboard=True
-    wandb.init(project='project-canopy')  # , sync_tensorboard=True
+#     wandb.init(project='project-canopy')  # , sync_tensorboard=True
     config = wandb.config
     
     job_name = args.job_name
@@ -342,9 +343,11 @@ if __name__ == '__main__':
     base_name_checkpoint = "model_resnet"
     save_checkpoint_s3 = SaveCheckpoints(base_name_checkpoint, lcl_chkpt_dir, s3_chkpt_dir)
 
-    early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_precision', mode='max', patience=20, verbose=1)
+    early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_recall', mode='max', patience=20, verbose=1)
+    
+    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_recall',mode='max', factor=0.1,patience=5, min_lr=0.001)
 
-    callbacks_list = [save_checkpoint_s3, early_stop, WandbCallback()]
+    callbacks_list = [save_checkpoint_s3, early_stop,reduce_lr, WandbCallback()]
 
     ######## WIP: multi GPUs ###########
     # if len(tf.config.experimental.list_physical_devices('GPU')) > 0:
