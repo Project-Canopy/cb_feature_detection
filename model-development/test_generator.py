@@ -23,7 +23,7 @@ from rasterio.session import AWSSession
 class TestGenerator:
     def __init__(self, label_file_path_test="labels_test_set.csv",
                  bucket_name='canopy-production-ml',
-                 label_mapping_path="labels.json",
+                 label_mapping_path="new_labels.json",
                  data_extension_type='.tif',
                  bands=['all'],
                  test_data_shape=(100, 100, 18),
