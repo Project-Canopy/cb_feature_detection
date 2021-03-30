@@ -26,21 +26,28 @@ class TestGenerator:
                  label_mapping_path="new_labels.json",
                  data_extension_type='.tif',
                  bands=['all'],
+                 file_mode="s3",
                  test_data_shape=(100, 100, 18),
                  test_data_batch_size=20,
                  enable_data_prefetch=False,
                  data_prefetch_size=tf.data.experimental.AUTOTUNE,
                  num_parallel_calls=2 * multiprocessing.cpu_count(),
                  output_shape=(tf.float32, tf.float32)):
+        
+        
 
-        self.s3 = boto3.resource('s3')
-        self.bucket_name = bucket_name
+            
 
         self.label_file_path_test = label_file_path_test
         self.label_mapping_path = label_mapping_path
         self.labels_file_test = pd.read_csv(self.label_file_path_test)
         self.test_filenames = self.labels_file_test.paths.to_list()
         self.bands = bands
+        self.file_mode = file_mode
+        
+        if self.file_mode == "s3":
+            self.s3 = boto3.resource('s3')
+            self.bucket_name = bucket_name
 
         self.num_parallel_calls = num_parallel_calls
         self.enable_data_prefetch = enable_data_prefetch
@@ -56,11 +63,11 @@ class TestGenerator:
 
         self.build_testing_dataset()
 
-    def read_s3_obj(self, s3_key):
-        s3 = self.s3
-        obj = s3.Object(self.bucket_name, s3_key)
-        obj_bytes = io.BytesIO(obj.get()['Body'].read())
-        return obj_bytes
+#     def read_s3_obj(self, s3_key):
+#         s3 = self.s3
+#         obj = s3.Object(self.bucket_name, s3_key)
+#         obj_bytes = io.BytesIO(obj.get()['Body'].read())
+#         return obj_bytes
 
     def build_testing_dataset(self):
         # Tensor of all the paths to the images
@@ -84,24 +91,30 @@ class TestGenerator:
             self.test_dataset = self.test_dataset.prefetch(self.data_prefetch_size)
 
     def read_image(self, path_img):
-        output_session = boto3.Session()
-        aws_session = AWSSession(output_session)
-        rasterio_env = rasterio.Env(
-            session=aws_session,
-            GDAL_DISABLE_READDIR_ON_OPEN='NO',
-            CPL_VSIL_CURL_USE_HEAD='NO',
-            GDAL_GEOREF_SOURCES='INTERNAL',
-            GDAL_TIFF_INTERNAL_MASK='NO'
-        )
-        with rasterio_env as env:
-            path_to_s3_img = "s3://" + self.bucket_name + "/" + path_img.numpy().decode()
-            with rasterio.open(path_to_s3_img, mode='r', sharing=False, GEOREF_SOURCES='INTERNAL') as src:
-                if self.bands == ['all']:
-                    # Need to transpose the image to have the channels last and not first as rasterio read the image
-                    # The input for the model is width*height*channels
-                    train_img = np.transpose(src.read(), (1, 2, 0))
-                else:
-                    train_img = np.transpose(src.read(self.bands), (1, 2, 0))
+        
+        if self.file_mode == "s3":
+            output_session = boto3.Session()
+            aws_session = AWSSession(output_session)
+            rasterio_env = rasterio.Env(
+                session=aws_session,
+                GDAL_DISABLE_READDIR_ON_OPEN='NO',
+                CPL_VSIL_CURL_USE_HEAD='NO',
+                GDAL_GEOREF_SOURCES='INTERNAL',
+                GDAL_TIFF_INTERNAL_MASK='NO'
+            )
+            with rasterio_env as env:
+                path_to_s3_img = "s3://" + self.bucket_name + "/" + path_img.numpy().decode()
+                with rasterio.open(path_to_s3_img, mode='r', sharing=False, GEOREF_SOURCES='INTERNAL') as src:
+                    if self.bands == ['all']:
+                        # Need to transpose the image to have the channels last and not first as rasterio read the image
+                        # The input for the model is width*height*channels
+                        train_img = np.transpose(src.read(), (1, 2, 0))
+                    else:
+                        train_img = np.transpose(src.read(self.bands), (1, 2, 0))
+        if self.file_mode == "fsx":
+            path_to_img = self.local_path_train + "/" + path_img.numpy().decode()
+            train_img = np.transpose(rasterio.open(path_to_img).read(self.bands), (1, 2, 0))
+            
             # Normalize image
         train_img = tf.image.convert_image_dtype(train_img, tf.float32)
         return train_img
