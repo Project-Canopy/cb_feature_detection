@@ -6,6 +6,9 @@ from tensorflow.keras.backend import categorical_crossentropy
 from tensorflow.keras.models import *
 from tensorflow.keras.layers import *
 from tensorflow.keras import layers
+from tensorflow.keras.losses import CategoricalCrossentropy
+
+# tf.keras.losses.CategoricalCrossentropy
 
 import numpy as np
 import argparse, os, subprocess, sys
@@ -149,7 +152,7 @@ class DataLoader:
         if path_img.numpy().decode() in self.labels_file_train.paths.to_list():
             ### Training csv
             # path_img is a tf.string and needs to be converted into a string using .numpy().decode()
-            id = int(self.labels_file_train[self.labels_file_train.paths == path_img.numpy().decode()].index.values)
+            id = int(self.labels_file_train[self.labels_file_train.paths == path_img.numpy().decode()].index.values[0])
             # The list of labels (e.g [0,1,0,0,0,0,0,0,0,0] is grabbed from the csv file on the row where the s3 path is
             label = self.labels_file_train.drop('paths', 1).iloc[int(id)].to_list()
         else:
@@ -289,6 +292,10 @@ if __name__ == '__main__':
     gpu_count = args.gpu_count
     model_dir = args.model_dir
     training_dir = args.training
+    
+    print(os.system(f"ls {training_dir}"))
+    
+    
     # validation_dir = args.validation
 
     def define_model(numclasses, input_shape, starting_checkpoint=None, lcl_chkpt_dir=None):
@@ -319,7 +326,7 @@ if __name__ == '__main__':
         top_model = Dense(2048, activation='relu')(top_model)
         top_model = Dense(2048, activation='relu')(top_model)
         # and a logistic layer
-        predictions = Dense(numclasses, activation='sigmoid')(top_model)
+        predictions = Dense(numclasses, activation='softmax')(top_model)
 
         # this is the model we will train
         model = Model(inputs=base_model.input, outputs=predictions)
@@ -345,7 +352,7 @@ if __name__ == '__main__':
 
     early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_recall', mode='max', patience=20, verbose=1)
     
-    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_recall',mode='max', factor=0.1,patience=5, min_lr=0.001)
+    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_recall',mode='max', factor=0.1,patience=5, min_lr=0.001, verbose=1)
 
     callbacks_list = [save_checkpoint_s3, early_stop,reduce_lr, WandbCallback()]
 
@@ -385,7 +392,8 @@ if __name__ == '__main__':
     # else:
     #     print("Running on CPU")
     model = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
-    model.compile(loss=SigmoidFocalCrossEntropy(),
+    model.compile(loss=CategoricalCrossentropy(),
+                  
                   # https://www.tensorflow.org/addons/api_docs/python/tfa/losses/SigmoidFocalCrossEntropy
                   optimizer=keras.optimizers.Adam(lr),
                   metrics=[tf.metrics.BinaryAccuracy(name='accuracy'),
