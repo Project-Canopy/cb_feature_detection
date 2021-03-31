@@ -12,18 +12,16 @@ import pandas as pd
 import boto3
 import io
 import json
-# from tensorflow_addons.metrics import F1Score, HammingLoss
+from tensorflow_addons.metrics import F1Score, HammingLoss
 from tensorflow_addons.losses import SigmoidFocalCrossEntropy
 import random
-# from save_checkpoint_callback_custom import SaveCheckpoints
-# import wandb
-# from wandb.keras import WandbCallback
+from save_checkpoint_callback_custom import SaveCheckpoints
+import wandb
+from wandb.keras import WandbCallback
 from rasterio.session import AWSSession
 
 class TestGenerator:
-    def __init__(self, 
-                 training_dir = "./fsx",
-label_file_path_test="labels_test_set.csv",
+    def __init__(self, label_file_path_test="labels_test_set.csv",
                  bucket_name='canopy-production-ml',
                  label_mapping_path="new_labels.json",
                  data_extension_type='.tif',
@@ -50,9 +48,6 @@ label_file_path_test="labels_test_set.csv",
         if self.file_mode == "s3":
             self.s3 = boto3.resource('s3')
             self.bucket_name = bucket_name
-            
-        if self.file_mode == "fsx":
-            self.local_path_train = training_dir
 
         self.num_parallel_calls = num_parallel_calls
         self.enable_data_prefetch = enable_data_prefetch
