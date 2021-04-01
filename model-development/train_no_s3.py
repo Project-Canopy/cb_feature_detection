@@ -6,7 +6,7 @@ from tensorflow.keras.backend import categorical_crossentropy
 from tensorflow.keras.models import *
 from tensorflow.keras.layers import *
 from tensorflow.keras import layers
-from tensorflow.keras.losses import CategoricalCrossentropy
+from tensorflow.keras.losses import CategoricalCrossentropy, BinaryCrossentropy
 
 # tf.keras.losses.CategoricalCrossentropy
 
@@ -325,8 +325,9 @@ if __name__ == '__main__':
         # let's add a fully-connected layer
         top_model = Dense(2048, activation='relu')(top_model)
         top_model = Dense(2048, activation='relu')(top_model)
-        # and a logistic layer
-        predictions = Dense(numclasses, activation='softmax')(top_model)
+        # and a logistic layer  
+        predictions = Dense(numclasses, activation="sigmoid")(top_model)
+        
 
         # this is the model we will train
         model = Model(inputs=base_model.input, outputs=predictions)
@@ -352,7 +353,7 @@ if __name__ == '__main__':
 
     early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_recall', mode='max', patience=20, verbose=1)
     
-    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_recall',mode='max', factor=0.1,patience=5, min_lr=0.001, verbose=1)
+    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',mode='min', factor=0.1,patience=5, min_lr=0.000001, verbose=1)
 
     callbacks_list = [save_checkpoint_s3, early_stop,reduce_lr, WandbCallback()]
 
@@ -392,14 +393,16 @@ if __name__ == '__main__':
     # else:
     #     print("Running on CPU")
     model = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
-    model.compile(loss=CategoricalCrossentropy(),
+    model.compile(loss=BinaryCrossentropy(),
                   
                   # https://www.tensorflow.org/addons/api_docs/python/tfa/losses/SigmoidFocalCrossEntropy
                   optimizer=keras.optimizers.Adam(lr),
                   metrics=[tf.metrics.BinaryAccuracy(name='accuracy'),
                            tf.keras.metrics.Precision(name='precision'),
+                           tf.keras.metrics.Precision(class_id=1,name='ISL_precision'),
                            # Computes the precision of the predictions with respect to the labels.
                            tf.keras.metrics.Recall(name='recall'),
+                           tf.keras.metrics.Recall(class_id=1,name='ISL_recall'),
                            # Computes the recall of the predictions with respect to the labels.
                            F1Score(num_classes=numclasses, name="f1_score")
                            # https://www.tensorflow.org/addons/api_docs/python/tfa/metrics/F1Score
