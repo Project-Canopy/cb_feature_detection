@@ -311,6 +311,7 @@ if __name__ == '__main__':
         base_model = keras.applications.ResNet50(include_top=False,
                                                  weights=None,
                                                  input_tensor=input_tensor)
+        base_model.trainable = False
 
         for i, layer in enumerate(base_model_resnet50.layers):
             # we must skip input layer, which has no weights
