@@ -231,6 +231,7 @@ if __name__ == '__main__':
     parser.add_argument('--rot90', type=str, default="False")
     parser.add_argument('--numclasses', type=float, default=10)
     parser.add_argument('--bands', required=True)
+    parser.add_argument('--freeze_bn_layer', default="False")
     parser.add_argument('--bucket', type=str, default="margaux-bucket-us-east-1")
     parser.add_argument('--training_file', type=str, default="labels_test_v1.csv")
     parser.add_argument('--validation_file', type=str, default="val_labels.csv")
@@ -306,17 +307,21 @@ if __name__ == '__main__':
         input_tensor = Conv2D(3, (1, 1))(input_tensor)
 
         base_model_resnet50 = keras.applications.ResNet50(include_top=False,
-                                                          weights='imagenet',
+                                                          weights="imagenet",
                                                           input_shape=(100, 100, 3))
+        
         base_model = keras.applications.ResNet50(include_top=False,
                                                  weights=None,
                                                  input_tensor=input_tensor)
-        base_model.trainable = False
 
         for i, layer in enumerate(base_model_resnet50.layers):
             # we must skip input layer, which has no weights
             if i == 0:
                 continue
+            if args.freeze_bn_layer.lower() == "true":
+                if "bn" in layer.name:
+                    layer.trainable = False
+                
             base_model.layers[i + 1].set_weights(layer.get_weights())
 
         # add a global spatial average pooling layer
@@ -347,6 +352,21 @@ if __name__ == '__main__':
             print('No previous checkpoint found in opt/ml/checkpoints directory; start training from scratch')
     
         return model
+    
+#     def Simple_CNN(numclasses, input_shape): #TODO use a more complex CNN
+#         model = Sequential([
+#             layers.Input(input_shape),
+#             layers.Conv2D(16, 3, padding='same', activation='relu'),
+#             layers.MaxPooling2D(),
+#             layers.Conv2D(32, 3, padding='same', activation='relu'),
+#             layers.MaxPooling2D(),
+#             layers.Conv2D(64, 3, padding='same', activation='relu'),
+#             layers.MaxPooling2D(),
+#             layers.Flatten(),
+#             layers.Dense(128, activation='relu'),
+#             layers.Dense(numclasses, activation="sigmoid")
+#         ])
+#         return model
 
     s3_chkpt_dir = s3_chkpt_base_dir + "/" + job_name
     base_name_checkpoint = "model_resnet"
@@ -393,7 +413,8 @@ if __name__ == '__main__':
     #                       )
     # else:
     #     print("Running on CPU")
-    model = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
+#     model = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
+    model = define_model(numclasses, input_shape,starting_checkpoint, lcl_chkpt_dir)
     model.compile(loss=BinaryCrossentropy(),
                   
                   # https://www.tensorflow.org/addons/api_docs/python/tfa/losses/SigmoidFocalCrossEntropy
