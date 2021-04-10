@@ -139,12 +139,12 @@ class DataLoader:
         self.validation_dataset = self.validation_dataset.batch(self.training_data_batch_size)
         print(f"Validation on {len(self.validation_filenames)} images ")
 
-    def read_image(self, path_img):
-        path_to_img = self.local_path_train + "/" + path_img.numpy().decode()
-        train_img = np.transpose(rasterio.open(path_to_img).read(self.bands), (1, 2, 0))
-        # Normalize image
-        train_img = tf.image.convert_image_dtype(train_img, tf.float32)
-        return train_img
+#     def read_image(self, path_img):
+#         path_to_img = self.local_path_train + "/" + path_img.numpy().decode()
+#         train_img = np.transpose(rasterio.open(path_to_img).read(self.bands), (1, 2, 0))
+#         # Normalize image
+#         train_img = tf.image.convert_image_dtype(train_img, tf.float32)
+#         return train_img
     
     def read_image(self, path_img):
         path_to_img = self.local_path_train + "/" + path_img.numpy().decode()
@@ -161,9 +161,13 @@ class DataLoader:
             train_img_ndvi = tf.image.convert_image_dtype(ndvi_band, tf.float32)
             train_img = tf.concat([train_img_no_ndvi,[train_img_ndvi]],axis=0)
             train_img = tf.transpose(train_img,perm=[1, 2, 0])
-
-        # Normalize image
-        train_img = tf.image.convert_image_dtype(train_img, tf.float32)
+        
+        else:
+            
+            train_img = np.transpose(rasterio.open(path_to_img).read(self.bands), (1, 2, 0))
+            # Normalize image
+            train_img = tf.image.convert_image_dtype(train_img, tf.float32)
+            
         return train_img 
     
 
@@ -228,6 +232,7 @@ if __name__ == '__main__':
     install('tensorflow-addons')
     from tensorflow_addons.metrics import F1Score, HammingLoss
     from tensorflow_addons.losses import SigmoidFocalCrossEntropy
+    from tensorflow_addons.optimizers import CyclicalLearningRate
 
     install('wandb')
     import wandb
@@ -373,20 +378,60 @@ if __name__ == '__main__':
     
         return model
     
-#     def Simple_CNN(numclasses, input_shape): #TODO use a more complex CNN
-#         model = Sequential([
-#             layers.Input(input_shape),
-#             layers.Conv2D(16, 3, padding='same', activation='relu'),
-#             layers.MaxPooling2D(),
-#             layers.Conv2D(32, 3, padding='same', activation='relu'),
-#             layers.MaxPooling2D(),
-#             layers.Conv2D(64, 3, padding='same', activation='relu'),
-#             layers.MaxPooling2D(),
-#             layers.Flatten(),
-#             layers.Dense(128, activation='relu'),
-#             layers.Dense(numclasses, activation="sigmoid")
-#         ])
-#         return model
+    def define_model_EfficientNetB0(numclasses, input_shape, starting_checkpoint=None, lcl_chkpt_dir=None):
+        # parameters for CNN
+        input_tensor = Input(shape=input_shape)
+
+        # introduce a additional layer to get from bands to 3 input channels
+        input_tensor = Conv2D(3, (1, 1))(input_tensor)
+
+        base_model_resnet50 = keras.applications.EfficientNetB0(include_top=False,
+                                                          weights="imagenet",
+                                                          input_shape=(100, 100, 3))
+        
+        base_model = keras.applications.EfficientNetB0(include_top=False,
+                                                 weights=None,
+                                                 input_tensor=input_tensor)
+
+        for i, layer in enumerate(base_model_resnet50.layers):
+            # we must skip input layer, which has no weights
+            if i == 0:
+                continue
+            if args.freeze_bn_layer.lower() == "true":
+                if "bn" in layer.name:
+                    layer.trainable = False
+                
+            base_model.layers[i + 1].set_weights(layer.get_weights())
+
+        # add a global spatial average pooling layer
+        top_model = base_model.output
+        top_model = GlobalAveragePooling2D()(top_model)
+
+        # let's add a fully-connected layer
+        top_model = Dense(2048, activation='relu')(top_model)
+        top_model = Dense(2048, activation='relu')(top_model)
+        # and a logistic layer  
+        predictions = Dense(numclasses, activation="sigmoid")(top_model)
+        
+
+        # this is the model we will train
+        model = Model(inputs=base_model.input, outputs=predictions)
+#         model.summary()
+        last_chkpt_path = lcl_chkpt_dir + 'last_chkpt.h5'
+        if os.path.exists(last_chkpt_path):
+            print('New spot instance; loading previous checkpoint')
+            model.load_weights(last_chkpt_path)
+        elif starting_checkpoint:
+            print('No previous checkpoint found in opt/ml/checkpoints directory; loading checkpoint from', starting_checkpoint)
+            s3 = boto3.client('s3')
+            chkpt_name = lcl_chkpt_dir + '/' + 'start_chkpt.h5'
+            s3.download_file('canopy-production-ml-output', starting_checkpoint, chkpt_name)
+            model.load_weights(chkpt_name)
+        else:
+            print('No previous checkpoint found in opt/ml/checkpoints directory; start training from scratch')
+    
+        return model
+    
 
     s3_chkpt_dir = s3_chkpt_base_dir + "/" + job_name
     base_name_checkpoint = "model_resnet"
@@ -394,7 +439,19 @@ if __name__ == '__main__':
 
     early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_recall', mode='max', patience=20, verbose=1)
     
-    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',mode='min', factor=0.1,patience=5, min_lr=0.000001, verbose=1)
+    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',mode='min', factor=0.1,patience=5, min_lr=0.00001, verbose=1)
+    
+    clr = CyclicalLearningRate(initial_learning_rate=.00001,
+                                        maximal_learning_rate=.0001,
+                                        step_size=5000, 
+                                        scale_fn=lambda x: 1 / (2.0 ** (x - 1)), 
+                                        scale_mode='cycle',
+                                        name='CyclicalLearningRate')
+    
+    lrs = tf.keras.callbacks.LearningRateScheduler(clr, verbose=1)
+
+
+
 
     callbacks_list = [save_checkpoint_s3, early_stop,reduce_lr, WandbCallback()]
 
@@ -433,8 +490,11 @@ if __name__ == '__main__':
     #                       )
     # else:
     #     print("Running on CPU")
-#     model = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
-    model = define_model(numclasses, input_shape,starting_checkpoint, lcl_chkpt_dir)
+    model = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
+
+#     model = define_model_EfficientNetB0(numclasses, input_shape,starting_checkpoint, lcl_chkpt_dir)
+
+
     model.compile(loss=BinaryCrossentropy(),
                   
                   # https://www.tensorflow.org/addons/api_docs/python/tfa/losses/SigmoidFocalCrossEntropy
