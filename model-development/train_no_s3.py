@@ -324,6 +324,9 @@ if __name__ == '__main__':
     # validation_dir = args.validation
 
     def define_model(numclasses, input_shape, starting_checkpoint=None, lcl_chkpt_dir=None):
+        
+        print("Using Pre-trained Resnet 50 model")
+        
         # parameters for CNN
         input_tensor = Input(shape=input_shape)
 
@@ -372,6 +375,9 @@ if __name__ == '__main__':
         return model
     
     def define_model_EfficientNetB0(numclasses, input_shape, starting_checkpoint=None, lcl_chkpt_dir=None):
+        
+        print("Using Pre-trained EfficientNetB0 For Training")
+        
         # parameters for CNN
         input_tensor = Input(shape=input_shape)
 
@@ -435,14 +441,14 @@ if __name__ == '__main__':
 
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',mode='min', factor=0.1,patience=5, min_lr=0.00001, verbose=1)
     
-    clr = CyclicalLearningRate(initial_learning_rate=.00001,
-                                        maximal_learning_rate=.0001,
-                                        step_size=5000, 
-                                        scale_fn=lambda x: 1 / (2.0 ** (x - 1)), 
-                                        scale_mode='cycle',
-                                        name='CyclicalLearningRate')
+#     clr = CyclicalLearningRate(initial_learning_rate=.00001,
+#                                         maximal_learning_rate=.0001,
+#                                         step_size=5000, 
+#                                         scale_fn=lambda x: 1 / (2.0 ** (x - 1)), 
+#                                         scale_mode='cycle',
+#                                         name='CyclicalLearningRate')
     
-    lrs = tf.keras.callbacks.LearningRateScheduler(clr, verbose=1)
+#     lrs = tf.keras.callbacks.LearningRateScheduler(clr, verbose=1)
 
     callbacks_list = [save_checkpoint_s3, early_stop,reduce_lr, WandbCallback()]
 
@@ -481,7 +487,7 @@ if __name__ == '__main__':
     #                       )
     # else:
     #     print("Running on CPU")
-    model = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
+    model = define_model_EfficientNetB0(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
 
 #     model = define_model_EfficientNetB0(numclasses, input_shape,starting_checkpoint, lcl_chkpt_dir)
 
