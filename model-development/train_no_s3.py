@@ -254,6 +254,7 @@ if __name__ == '__main__':
     parser.add_argument('--flip_left_right', type=str, default="False")
     parser.add_argument('--flip_up_down', type=str, default="False")
     parser.add_argument('--rot90', type=str, default="False")
+    parser.add_argument('--freeze_bn_layer', default="False")
     parser.add_argument('--numclasses', type=float, default=10)
     parser.add_argument('--bands', required=True)
     parser.add_argument('--bucket', type=str, default="margaux-bucket-us-east-1")
@@ -441,14 +442,14 @@ if __name__ == '__main__':
 
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',mode='min', factor=0.1,patience=5, min_lr=0.00001, verbose=1)
     
-#     clr = CyclicalLearningRate(initial_learning_rate=.00001,
-#                                         maximal_learning_rate=.0001,
-#                                         step_size=5000, 
-#                                         scale_fn=lambda x: 1 / (2.0 ** (x - 1)), 
-#                                         scale_mode='cycle',
-#                                         name='CyclicalLearningRate')
+clr = CyclicalLearningRate(initial_learning_rate=.00001,
+                                        maximal_learning_rate=.0005,
+                                        step_size=2500,
+                                        scale_fn=lambda x: 1 / (2.0 ** (x - 1)),
+                                        scale_mode='cycle',
+                                        name='CyclicalLearningRate')
     
-#     lrs = tf.keras.callbacks.LearningRateScheduler(clr, verbose=1)
+    lrs = tf.keras.callbacks.LearningRateScheduler(clr, verbose=1)
 
     callbacks_list = [save_checkpoint_s3, early_stop,reduce_lr, WandbCallback()]
 
