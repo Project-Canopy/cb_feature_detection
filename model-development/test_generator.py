@@ -12,16 +12,18 @@ import pandas as pd
 import boto3
 import io
 import json
-from tensorflow_addons.metrics import F1Score, HammingLoss
+# from tensorflow_addons.metrics import F1Score, HammingLoss
 from tensorflow_addons.losses import SigmoidFocalCrossEntropy
 import random
-from save_checkpoint_callback_custom import SaveCheckpoints
-import wandb
-from wandb.keras import WandbCallback
+# from save_checkpoint_callback_custom import SaveCheckpoints
+# import wandb
+# from wandb.keras import WandbCallback
 from rasterio.session import AWSSession
 
 class TestGenerator:
-    def __init__(self, label_file_path_test="labels_test_set.csv",
+    def __init__(self, 
+                 training_dir = "./fsx",
+label_file_path_test="labels_test_set.csv",
                  bucket_name='canopy-production-ml',
                  label_mapping_path="new_labels.json",
                  data_extension_type='.tif',
@@ -48,6 +50,9 @@ class TestGenerator:
         if self.file_mode == "s3":
             self.s3 = boto3.resource('s3')
             self.bucket_name = bucket_name
+            
+        if self.file_mode == "file":
+            self.local_path_train = training_dir
 
         self.num_parallel_calls = num_parallel_calls
         self.enable_data_prefetch = enable_data_prefetch
@@ -111,7 +116,7 @@ class TestGenerator:
                         train_img = np.transpose(src.read(), (1, 2, 0))
                     else:
                         train_img = np.transpose(src.read(self.bands), (1, 2, 0))
-        if self.file_mode == "fsx":
+        if self.file_mode == "file":
             path_to_img = self.local_path_train + "/" + path_img.numpy().decode()
             train_img = np.transpose(rasterio.open(path_to_img).read(self.bands), (1, 2, 0))
             
@@ -124,13 +129,13 @@ class TestGenerator:
         if path_img.numpy().decode() in self.labels_file_test.paths.to_list():
             ### test csv
             # path_img is a tf.string and needs to be converted into a string using .numpy().decode()
-            id = int(self.labels_file_test[self.labels_file_test.paths == path_img.numpy().decode()].index.values)
+            id = int(self.labels_file_test[self.labels_file_test.paths == path_img.numpy().decode()].index.values[0])
             # The list of labels (e.g [0,1,0,0,0,0,0,0,0,0] is grabbed from the csv file on the row where the s3 path is
             label = self.labels_file_test.drop('paths', 1).iloc[int(id)].to_list()
         else:
             ### Validation csv
             # path_img is a tf.string and needs to be converted into a string using .numpy().decode()
-            id = int(self.labels_file_val[self.labels_file_val.paths == path_img.numpy().decode()].index.values)
+            id = int(self.labels_file_val[self.labels_file_val.paths == path_img.numpy().decode()].index.values[0])
             # The list of labels (e.g [0,1,0,0,0,0,0,0,0,0] is grabbed from the csv file on the row where the s3 path is
             label = self.labels_file_val.drop('paths', 1).iloc[int(id)].to_list()
         return label
