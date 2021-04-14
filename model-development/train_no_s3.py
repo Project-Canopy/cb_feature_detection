@@ -242,23 +242,33 @@ class LRFinder(keras.callbacks.Callback):
 
     def on_train_batch_begin(self, batch, logs=None):
         self.lr = self.exp_annealing(self.step)
+        print('Current learning rate:', self.lr)
         tf.keras.backend.set_value(self.model.optimizer.lr, self.lr)
 
     def on_train_batch_end(self, batch, logs=None):
+        print('Batch end')
         logs = logs or {}
         loss = logs.get('loss')
+        print('Loss:', loss)
         step = self.step
         if loss:
             self.avg_loss = self.smoothing * self.avg_loss + (1 - self.smoothing) * loss
             smooth_loss = self.avg_loss / (1 - self.smoothing ** (self.step + 1))
             self.losses.append(smooth_loss)
             self.lrs.append(self.lr)
+            
+            print('if/then statement 1')
 
             if step == 0 or loss < self.best_loss:
+                print('New best loss found!')
                 self.best_loss = loss
+                
+            print('if/then statement 2')
 
             if smooth_loss > 4 * self.best_loss or tf.math.is_nan(smooth_loss):
                 self.model.stop_training = True
+                
+        print('if/then statement 3')
 
         if step == self.max_steps:
             self.model.stop_training = True
