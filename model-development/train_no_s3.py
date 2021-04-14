@@ -6,7 +6,7 @@ from tensorflow.keras.backend import categorical_crossentropy
 from tensorflow.keras.models import *
 from tensorflow.keras.layers import *
 from tensorflow.keras import layers
-from tensorflow.keras.losses import CategoricalCrossentropy
+from tensorflow.keras.losses import CategoricalCrossentropy, BinaryCrossentropy
 
 # tf.keras.losses.CategoricalCrossentropy
 
@@ -20,6 +20,7 @@ import random
 import h5py
 import multiprocessing
 import time
+import pickle
 
 print("Num GPUs Available: ", len(tf.config.experimental.list_physical_devices('GPU')))
 
@@ -182,7 +183,7 @@ class DataLoader:
         else:
             ### Validation csv
             # path_img is a tf.string and needs to be converted into a string using .numpy().decode()
-            id = int(self.labels_file_val[self.labels_file_val.paths == path_img.numpy().decode()].index.values)
+            id = int(self.labels_file_val[self.labels_file_val.paths == path_img.numpy().decode()].index.values[0])
             # The list of labels (e.g [0,1,0,0,0,0,0,0,0,0] is grabbed from the csv file on the row where the s3 path is
             label = self.labels_file_val.drop('paths', 1).iloc[int(id)].to_list()
         return label
@@ -220,6 +221,72 @@ class SaveCheckpoints(keras.callbacks.Callback):
         s3_path = self.s3_chkpt_dir + "/" + last_chkpt_filename
         s3.Bucket(BUCKET).upload_file(last_chkpt_path, s3_path)
         
+class LRFinder(keras.callbacks.Callback):
+    """Callback that exponentially adjusts the learning rate after each training batch between start_lr and
+    end_lr for a maximum number of batches: max_step. The loss and learning rate are recorded at each step allowing
+    visually finding a good learning rate as per https://sgugger.github.io/how-do-you-find-a-good-learning-rate.html via
+    the plot method.
+    """
+
+    def __init__(self, start_lr: float = 1e-7, end_lr: float = 10, max_steps: int = 100, smoothing=0.9):
+        super(LRFinder, self).__init__()
+        self.start_lr, self.end_lr = start_lr, end_lr
+        self.max_steps = max_steps
+        self.smoothing = smoothing
+        self.step, self.best_loss, self.avg_loss, self.lr = 0, 0, 0, 0
+        self.lrs, self.losses = [], []
+
+    def on_train_begin(self, logs=None):
+        self.step, self.best_loss, self.avg_loss, self.lr = 0, 0, 0, 0
+        self.lrs, self.losses = [], []
+
+    def on_train_batch_begin(self, batch, logs=None):
+        self.lr = self.exp_annealing(self.step)
+        tf.keras.backend.set_value(self.model.optimizer.lr, self.lr)
+
+    def on_train_batch_end(self, batch, logs=None):
+        logs = logs or {}
+        loss = logs.get('loss')
+        step = self.step
+        if loss:
+            self.avg_loss = self.smoothing * self.avg_loss + (1 - self.smoothing) * loss
+            smooth_loss = self.avg_loss / (1 - self.smoothing ** (self.step + 1))
+            self.losses.append(smooth_loss)
+            self.lrs.append(self.lr)
+
+            if step == 0 or loss < self.best_loss:
+                self.best_loss = loss
+
+            if smooth_loss > 4 * self.best_loss or tf.math.is_nan(smooth_loss):
+                self.model.stop_training = True
+
+        if step == self.max_steps:
+            self.model.stop_training = True
+
+        self.step += 1
+
+    def exp_annealing(self, step):
+        return self.start_lr * (self.end_lr / self.start_lr) ** (step * 1. / self.max_steps)
+
+    def plot(self):
+        fig, ax = plt.subplots(1, 1)
+        ax.set_ylabel('Loss')
+        ax.set_xlabel('Learning Rate (log scale)')
+        ax.set_xscale('log')
+        ax.xaxis.set_major_formatter(plt.FormatStrFormatter('%.0e'))
+        ax.plot(self.lrs, self.losses)
+        
+        
+    def on_epoch_end(self, epoch, logs={}):
+        epoch = epoch + 1 
+        print(f'\nEpoch {epoch} saving lr_finder_object')
+        filename = "lr_finder.pkl"
+        local_path =  self.lcl_chkpt_dir + "/" + filename
+        s3_path = self.s3_chkpt_dir + "/" + filename
+        pickle.dump(self, open( local_path, "wb" ) )
+        s3 = boto3.resource('s3')
+        BUCKET = "canopy-production-ml-output"
+        s3.Bucket(BUCKET).upload_file(local_path, s3_path)
 
 
 if __name__ == '__main__':
@@ -246,8 +313,13 @@ if __name__ == '__main__':
     import boto3
 
     parser = argparse.ArgumentParser()
-
     parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--model', type=str, default="resnet")
+    parser.add_argument('--callback', type=str, default="lrplateau")
+    parser.add_argument('--clr_initial', type=float, default=.00001)
+    parser.add_argument('--clr_max', type=float, default=.0005)
+    parser.add_argument('--clr_step', type=int, default=2500)
+    parser.add_argument('--lr_reduce_min', type=float, default=.00001)
     parser.add_argument('--learning-rate', type=float, default=0.01)
     parser.add_argument('--batch-size', type=int, default=20)
     parser.add_argument('--augment', type=str, default="False")
@@ -304,6 +376,8 @@ if __name__ == '__main__':
         augmentation_data = False
     else:
         augmentation_data = True
+        
+    lr_callback = args.callback.lower() 
 
     print(f"lr: {lr}, batch_size: {batch_size}, augmentation_data: {augmentation_data}")
     
@@ -321,27 +395,39 @@ if __name__ == '__main__':
     
     print(os.system(f"ls {training_dir}"))
     
-    
-    # validation_dir = args.validation
+    pre_trained_model = args.model
 
     def define_model(numclasses, input_shape, starting_checkpoint=None, lcl_chkpt_dir=None):
         
-        print("Using Pre-trained Resnet 50 model")
+        print(f"Using Pre-trained {pre_trained_model} model")
         
         # parameters for CNN
         input_tensor = Input(shape=input_shape)
 
         # introduce a additional layer to get from bands to 3 input channels
         input_tensor = Conv2D(3, (1, 1))(input_tensor)
+        
+        if pre_trained_model == "resnet50":
 
-        base_model_resnet50 = keras.applications.ResNet50(include_top=False,
-                                                          weights='imagenet',
+            base_model_pre_trained = keras.applications.ResNet50(include_top=False,
+                                                              weights='imagenet',
+                                                              input_shape=(100, 100, 3))
+            base_model = keras.applications.ResNet50(include_top=False,
+                                                     weights=None,
+                                                     input_tensor=input_tensor)
+        if pre_trained_model == "efficientnetb0":
+            
+            base_model_pre_trained = keras.applications.EfficientNetB0(include_top=False,
+                                                          weights="imagenet",
                                                           input_shape=(100, 100, 3))
-        base_model = keras.applications.ResNet50(include_top=False,
-                                                 weights=None,
-                                                 input_tensor=input_tensor)
+            
+            base_model = keras.applications.EfficientNetB0(include_top=False,
+                                         weights=None,
+                                         input_tensor=input_tensor)
+            
+            
 
-        for i, layer in enumerate(base_model_resnet50.layers):
+        for i, layer in enumerate(base_model_pre_trained.layers):
             # we must skip input layer, which has no weights
             if i == 0:
                 continue
@@ -375,83 +461,52 @@ if __name__ == '__main__':
     
         return model
     
-    def define_model_EfficientNetB0(numclasses, input_shape, starting_checkpoint=None, lcl_chkpt_dir=None):
-        
-        print("Using Pre-trained EfficientNetB0 For Training")
-        
-        # parameters for CNN
-        input_tensor = Input(shape=input_shape)
-
-        # introduce a additional layer to get from bands to 3 input channels
-        input_tensor = Conv2D(3, (1, 1))(input_tensor)
-
-        base_model_resnet50 = keras.applications.EfficientNetB0(include_top=False,
-                                                          weights="imagenet",
-                                                          input_shape=(100, 100, 3))
-        
-        base_model = keras.applications.EfficientNetB0(include_top=False,
-                                                 weights=None,
-                                                 input_tensor=input_tensor)
-
-        for i, layer in enumerate(base_model_resnet50.layers):
-            # we must skip input layer, which has no weights
-            if i == 0:
-                continue
-            if args.freeze_bn_layer.lower() == "true":
-                if "bn" in layer.name:
-                    layer.trainable = False
-                
-            base_model.layers[i + 1].set_weights(layer.get_weights())
-
-        # add a global spatial average pooling layer
-        top_model = base_model.output
-        top_model = GlobalAveragePooling2D()(top_model)
-
-        # let's add a fully-connected layer
-        top_model = Dense(2048, activation='relu')(top_model)
-        top_model = Dense(2048, activation='relu')(top_model)
-        # and a logistic layer  
-        predictions = Dense(numclasses, activation="sigmoid")(top_model)
-        
-
-        # this is the model we will train
-        model = Model(inputs=base_model.input, outputs=predictions)
-#         model.summary()
-        last_chkpt_path = lcl_chkpt_dir + 'last_chkpt.h5'
-        if os.path.exists(last_chkpt_path):
-            print('New spot instance; loading previous checkpoint')
-            model.load_weights(last_chkpt_path)
-        elif starting_checkpoint:
-            print('No previous checkpoint found in opt/ml/checkpoints directory; loading checkpoint from', starting_checkpoint)
-            s3 = boto3.client('s3')
-            chkpt_name = lcl_chkpt_dir + '/' + 'start_chkpt.h5'
-            s3.download_file('canopy-production-ml-output', starting_checkpoint, chkpt_name)
-            model.load_weights(chkpt_name)
-        else:
-            print('No previous checkpoint found in opt/ml/checkpoints directory; start training from scratch')
-    
-        return model
-    
-
     s3_chkpt_dir = s3_chkpt_base_dir + "/" + job_name
     base_name_checkpoint = "model_resnet"
     save_checkpoint_s3 = SaveCheckpoints(base_name_checkpoint, lcl_chkpt_dir, s3_chkpt_dir)
 
     early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_recall', mode='max', patience=20, verbose=1)
     
-
-    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',mode='min', factor=0.1,patience=5, min_lr=0.00001, verbose=1)
-    
-clr = CyclicalLearningRate(initial_learning_rate=.00001,
-                                        maximal_learning_rate=.0005,
-                                        step_size=2500,
-                                        scale_fn=lambda x: 1 / (2.0 ** (x - 1)),
+    if lr_callback == "clr":
+        
+        clr_initial = args.clr_initial
+        clr_max = args.clr_max
+        clr_step = args.clr_step
+        
+        clr = CyclicalLearningRate(initial_learning_rate=clr_initial,
+                                        maximal_learning_rate=clr_max,
+                                        step_size=clr_step,
+                                       scale_fn=lambda x: 1 / (2.0 ** (x - 1)),
                                         scale_mode='cycle',
                                         name='CyclicalLearningRate')
     
-    lrs = tf.keras.callbacks.LearningRateScheduler(clr, verbose=1)
+        lrs = tf.keras.callbacks.LearningRateScheduler(clr, verbose=1)
+        
+        lr_callback = lrs
+        
+        
+    if lr_callback == "lrplateau":
+        
+        lr_reduce_min = args.lr_reduce_min
 
-    callbacks_list = [save_checkpoint_s3, early_stop,reduce_lr, WandbCallback()]
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',
+                                                         mode='min', 
+                                                         factor=0.1,
+                                                         patience=5, 
+                                                         min_lr=lr_reduce_min, 
+                                                         verbose=1)
+        lr_callback = reduce_lr
+    
+
+    callbacks_list = [save_checkpoint_s3, early_stop,lr_callback, WandbCallback()]
+    
+            
+    if lr_callback == "lrfinder":
+        
+        lr_callback = LRFinder()
+        
+        callbacks_list = [save_checkpoint_s3, lr_callback, WandbCallback()]
+        
 
     ######## WIP: multi GPUs ###########
     # if len(tf.config.experimental.list_physical_devices('GPU')) > 0:
@@ -488,9 +543,7 @@ clr = CyclicalLearningRate(initial_learning_rate=.00001,
     #                       )
     # else:
     #     print("Running on CPU")
-    model = define_model_EfficientNetB0(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
-
-#     model = define_model_EfficientNetB0(numclasses, input_shape,starting_checkpoint, lcl_chkpt_dir)
+    model = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
 
 
     model.compile(loss=BinaryCrossentropy(),
@@ -498,8 +551,10 @@ clr = CyclicalLearningRate(initial_learning_rate=.00001,
                   optimizer=keras.optimizers.Adam(lr),
                   metrics=[tf.metrics.BinaryAccuracy(name='accuracy'),
                            tf.keras.metrics.Precision(name='precision'),
+                           tf.keras.metrics.Precision(class_id=1,name='ISL_precision'),
                            # Computes the precision of the predictions with respect to the labels.
                            tf.keras.metrics.Recall(name='recall'),
+                           tf.keras.metrics.Recall(class_id=1,name='ISL_recall'),
                            # Computes the recall of the predictions with respect to the labels.
                            F1Score(num_classes=numclasses, name="f1_score")
                            # https://www.tensorflow.org/addons/api_docs/python/tfa/metrics/F1Score
@@ -526,3 +581,4 @@ clr = CyclicalLearningRate(initial_learning_rate=.00001,
                         epochs=epochs,
                         callbacks=callbacks_list,
                         )
+
