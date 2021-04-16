@@ -228,8 +228,11 @@ class LRFinder(keras.callbacks.Callback):
     the plot method.
     """
 
-    def __init__(self, start_lr: float = 1e-7, end_lr: float = 10, max_steps: int = 100, smoothing=0.9):
+    def __init__(self, start_lr: float = 1e-7, end_lr: float = 10, max_steps: int = 100, smoothing=0.9,                 lcl_chkpt_dir=None,
+                s3_chkpt_dir=None):
         super(LRFinder, self).__init__()
+        self.lcl_chkpt_dir = lcl_chkpt_dir 
+        self.s3_chkpt_dir = s3_chkpt_dir
         self.start_lr, self.end_lr = start_lr, end_lr
         self.max_steps = max_steps
         self.smoothing = smoothing
@@ -242,8 +245,9 @@ class LRFinder(keras.callbacks.Callback):
 
     def on_train_batch_begin(self, batch, logs=None):
         self.lr = self.exp_annealing(self.step)
-        print('Current learning rate:', self.lr)
-        tf.keras.backend.set_value(self.model.optimizer.lr, self.lr)
+        print('Current batch learning rate:',tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+        print('New learning rate:', self.lr)
+        tf.keras.backend.set_value(self.model.optimizer.learning_rate, self.lr)
 
     def on_train_batch_end(self, batch, logs=None):
         print('Batch end')
@@ -290,10 +294,13 @@ class LRFinder(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs={}):
         epoch = epoch + 1 
         print(f'\nEpoch {epoch} saving lr_finder_object')
-        filename = "lr_finder.pkl"
+        loss = self.losses
+        lr = self.lrs
+        df = pd.DataFrame(data={"loss":loss,"lr":lr})
+        filename = "lr_finder.csv"
         local_path =  self.lcl_chkpt_dir + "/" + filename
         s3_path = self.s3_chkpt_dir + "/" + filename
-        pickle.dump(self, open( local_path, "wb" ) )
+        df.to_csv(local_path,index=False)
         s3 = boto3.resource('s3')
         BUCKET = "canopy-production-ml-output"
         s3.Bucket(BUCKET).upload_file(local_path, s3_path)
@@ -474,6 +481,7 @@ if __name__ == '__main__':
     s3_chkpt_dir = s3_chkpt_base_dir + "/" + job_name
     base_name_checkpoint = "model_resnet"
     save_checkpoint_s3 = SaveCheckpoints(base_name_checkpoint, lcl_chkpt_dir, s3_chkpt_dir)
+    save_lr_finder_s3 = LRFinder(lcl_chkpt_dir=lcl_chkpt_dir, s3_chkpt_dir=s3_chkpt_dir)
 
     early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_recall', mode='max', patience=20, verbose=1)
     
@@ -499,7 +507,7 @@ if __name__ == '__main__':
         
         lr_reduce_min = args.lr_reduce_min
 
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss',
                                                          mode='min', 
                                                          factor=0.1,
                                                          patience=5, 
@@ -513,9 +521,9 @@ if __name__ == '__main__':
             
     if lr_callback == "lrfinder":
         
-        lr_callback = LRFinder()
+        lr_callback = save_lr_finder_s3
         
-        callbacks_list = [save_checkpoint_s3, lr_callback, WandbCallback()]
+        callbacks_list = [lr_callback, WandbCallback()]
         
 
     ######## WIP: multi GPUs ###########
