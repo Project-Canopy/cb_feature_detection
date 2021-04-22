@@ -7,10 +7,13 @@ from tensorflow.keras.models import *
 from tensorflow.keras.layers import *
 from tensorflow.keras import layers
 import tensorflow.keras as keras
+# import keras
 import pandas as pd
 import boto3
 import io
 import json
+from tensorflow_addons.metrics import F1Score, HammingLoss
+# from tensorflow_addons.losses import SigmoidFocalCrossEntropy
 import random
 
     
@@ -36,30 +39,35 @@ def load_model(model_url,weights_url):
     return model 
 
 
+def read_image_tf_out(window_arr):
+
+    #create copy of bands list, remove ndvi band from copy 
+    window_arr_no_ndvi = window_arr.copy()
+    window_arr_no_ndvi = window_arr_no_ndvi[:-1] 
+    tf_img_no_ndvi = tf.image.convert_image_dtype(window_arr_no_ndvi, tf.float32)
+    
+    ndvi_band = window_arr_no_ndvi[-1]
+    tf_img_ndvi = tf.image.convert_image_dtype(ndvi_band, tf.float32)
+    
+    tf_img = tf.concat([tf_img_no_ndvi,[tf_img_ndvi]],axis=0)
+    tf_img = tf.transpose(tf_img,perm=[1, 2, 0])
+    tf_img = tf.expand_dims(tf_img, axis=0)
+
+    return tf_img
+
 def read_image(window_arr):
 
-    if self.file_mode == "file":
+    #create copy of bands list, remove ndvi band from copy 
+    window_arr_no_ndvi = window_arr.copy()
+    window_arr_no_ndvi = window_arr_no_ndvi[:-1].astype('float32')
+    
+    ndvi_band = window_arr_no_ndvi[-1].astype('float32')
+    
+    img = np.concatenate([window_arr_no_ndvi,[ndvi_band]],axis=0)
+    img = np.transpose(img, (1, 2, 0))
 
-        path_to_img = self.local_path_train + "/" + path_img.numpy().decode()
 
-        if 18 in self.bands:
-
-            #create copy of bands list, remove ndvi band from copy 
-            bands_copy = self.bands.copy()
-            bands_copy.remove(18)
-            train_img_no_ndvi = tf.image.convert_image_dtype(train_img_no_ndvi, tf.float32)
-            ndvi_band = rasterio.open(path_to_img).read(18)
-            train_img_ndvi = tf.image.convert_image_dtype(ndvi_band, tf.float32)
-            train_img = tf.concat([train_img_no_ndvi,[train_img_ndvi]],axis=0)
-            train_img = tf.transpose(train_img,perm=[1, 2, 0])
-
-        else:
-
-            train_img = np.transpose(rasterio.open(path_to_img).read(self.bands), (1, 2, 0))
-            # Normalize image
-            train_img = tf.image.convert_image_dtype(train_img, tf.float32)
-
-        return train_img
+    return np.array([img])
 
 
 
