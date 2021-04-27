@@ -15,10 +15,11 @@ import json
 from tensorflow_addons.metrics import F1Score, HammingLoss
 # from tensorflow_addons.losses import SigmoidFocalCrossEntropy
 import random
+import time
 
     
     
-def load_model(model_url,weights_url):
+def download_model(model_url,weights_url):
 
     s3 = boto3.resource('s3')
     model_filename = "model.h5"
@@ -32,11 +33,40 @@ def load_model(model_url,weights_url):
     weights_key = "/".join(weights_url.split("/")[3:])
     s3.Bucket(bucket).download_file(weights_key, model_weights_filename)
 
+    return 
 
-    model = tf.keras.models.load_model(model_filename)
-    model.load_weights(model_weights_filename)
+    
+def load_model(model_path,model_weights_path):
+
+    model = tf.keras.models.load_model(model_path)
+    model.load_weights(model_weights_path)
 
     return model 
+
+def gen_timestamp():
+    time_stamp = time.strftime("%Y-%m-%d-%H-%M-%S", time.gmtime())
+    return time_stamp
+
+def save_to_s3(output_dict,local_path,job_name,timestamp):
+    
+    with open(local_path, 'w') as jp:
+        json.dump(output_dict, jp)
+        
+    filename = local_path.split("/")[-1]
+    output_base_path = "s3://canopy-production-ml/inference/output/"
+    job_name = "inference_output_test"
+    full_name = f'{job_name}-{timestamp}.json'
+    s3_path = "/".join(output_base_path.split("/")[3:]) + full_name
+    BUCKET = output_base_path.split("/")[2]
+    s3 = boto3.resource('s3')
+    s3.Bucket(BUCKET).upload_file(local_path, s3_path)
+    
+def read_json_label_file():
+    # to create
+    
+def output_sample_chips(json_file,label_name,amount_of_chips):
+    # to do
+    
 
 
 def read_image_tf_out(window_arr):
