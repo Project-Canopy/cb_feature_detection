@@ -493,15 +493,17 @@ if __name__ == '__main__':
                 continue
     
         if h5_files_dict:
-            print('Spot instance restarting; loading previous checkpoint')
 
             max_epoch = max(h5_files_dict.keys())
             last_chkpt_s3_path = h5_files_dict[max_epoch]
+            
+            print('Spot instance restarting; loading previous checkpoint from',last_chkpt_s3_path)
+            
             last_chkpt_filename = last_chkpt_s3_path.split("/")[-1]
             last_chkpt_local_path = lcl_chkpt_dir + '/' + last_chkpt_filename
             my_bucket.download_file(last_chkpt_s3_path, last_chkpt_local_path)
             model.load_weights(last_chkpt_local_path)
-            start_epoch = max_epoch + 1
+            start_epoch = max_epoch
             
         elif starting_checkpoint:
             start_epoch = 0 
