@@ -3,7 +3,7 @@ FROM 763104351884.dkr.ecr.us-east-1.amazonaws.com/tensorflow-training:2.4.1-gpu-
 ENV PATH="/opt/ml/code:${PATH}"
 
 # Install rasterio for reading TIFF files in TF Image Loader
-RUN pip3 install rasterio wandb tensorflow-addons
+RUN pip3 install rasterio geopandas shapely tensorflow tensorflow-addons[tensorflow]
 
 
 # Copies the training code inside the container
