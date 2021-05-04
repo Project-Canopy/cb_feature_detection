@@ -42,7 +42,7 @@ class Handler:
                 "total_batch_count": The total number of batches in this job
                 "start_time": The time that this job started
         """
-        self.granule_dir = self.mount_efs()
+        self.s3_dir_url = config["file_dir"]
         self.job_name = config["job_name"]
         self.model_url = config["model_url"] 
         self.weights_url = config["weights_url"]
@@ -50,7 +50,7 @@ class Handler:
         self.model_weights_filename = "model_weights.h5"
         self.download_model_files()
         self.model = self.load_model()
-        self.output_path = "./output/"
+        self.output_dir = "./output/"
         self.label_list = ["Industrial_agriculture","ISL","Mining","Roads","Shifting_cultivation"]
         print("model loaded and ready for predictions")
 
@@ -75,9 +75,9 @@ class Handler:
         if payload["start"].lower() == "none":
             print("starting predictions")
             self.predict()
-        if payload["start"].lower() == "cli":
-            command = payload["command"]
-            os.system(command)
+        # if payload["start"].lower() == "cli":
+            # command = payload["command"]
+            # os.system(command)
 
 
     def on_job_complete(self):
@@ -87,16 +87,6 @@ class Handler:
         """
         pass
 
-    def mount_efs(self):
-        command_install_package_manager = "curl -sSL https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash"
-        efs_dir = "efs"
-        os.system('mkdir efs')
-        install_nfs = 'yum install nfs-utils nfs-utils-lib'
-        os.system(install_nfs)
-        mount_command = 'mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport fs-b15b8905.efs.us-east-1.amazonaws.com:/ efs'
-        os.system(mount_command)
-        print("mounted efs granule directory to root")
-        return f"./{efs_dir}"
     
     def download_model_files(self):
 
@@ -120,26 +110,43 @@ class Handler:
 
         return model 
 
+    def s3_dir_ls(self,s3_dir_url):
+
+        objs = []
+        bucket = s3_dir_url.split("/")[2]
+        key = "/".join(s3_dir_url.split("/")[3:5])
+
+        s3 = boto3.resource('s3')
+        my_bucket = s3.Bucket(bucket)
+
+
+        for obj in my_bucket.objects.filter(Prefix=key):
+            objs.append("s3://" + bucket + "/" + obj.key)
+
+        return objs[1:]
+
+
     def gen_timestamp(self):
         time_stamp = time.strftime("%Y-%m-%d-%H-%M-%S", time.gmtime())
         return time_stamp
 
     def save_to_s3(self,output_dict,timestamp):
 
-        local_path = self.output_path
-        os.system(f"mkdir {local_path}")
+        output_dir = self.output_dir
+        os.system(f"mkdir {output_dir}")
+        filename = "output.json"
+        file_path = output_dir + filename
         
-        with open(local_path, 'w') as jp:
+        with open(file_path, 'w') as jp:
             json.dump(output_dict, jp)
             
-        filename = local_path.split("/")[-1]
         output_base_path = "s3://canopy-production-ml/inference/output/"
         job_name = self.job_name
         full_name = f'{job_name}-{timestamp}.json'
         s3_path = "/".join(output_base_path.split("/")[3:]) + full_name
         BUCKET = output_base_path.split("/")[2]
         s3 = boto3.resource('s3')
-        s3.Bucket(BUCKET).upload_file(local_path, s3_path)
+        s3.Bucket(BUCKET).upload_file(file_path, s3_path)
         
     # def read_json_label_file():
         # to create
@@ -208,10 +215,10 @@ class Handler:
                 output_filename=None):
 
         print("starting prediction function")
-        granule_dir=self.granule_dir
         model=self.model
         label_list=self.label_list
-        granule_list=glob(f'{granule_dir}/*.tif')
+        # granule_list=glob(f'{granule_dir}/*.tif')
+        granule_list = self.s3_dir_ls(self.s3_dir_url)
         print(f"found {len(granule_list)} granules")
         output_dict={}
         timestamp=self.gen_timestamp()
@@ -219,7 +226,7 @@ class Handler:
             granule_id = granule_path.split("/")[-1].split("_")[0]
 
             with rio.open(granule_path) as src:
-                windows = get_windows(src.shape, (patch_size, patch_size), (stride, stride))
+                windows = self.get_windows(src.shape, (patch_size, patch_size), (stride, stride))
 
                 for i, window in enumerate(windows):
                     print(f"predicting window {i + 1} of {len(windows)} of granulate {j + 1} of {len(granule_list)}",end='\r', flush=True)
@@ -238,7 +245,7 @@ class Handler:
 
 
                     #image pre-processing / inference
-                    prediction = model.predict(read_image_tf_out(data))
+                    prediction = model.predict(self.read_image_tf_out(data))
                     prediction = np.where(prediction > predict_thresh, 1, 0)
                     prediction_i = np.where(prediction == 1)[1]
                     for i in prediction_i:

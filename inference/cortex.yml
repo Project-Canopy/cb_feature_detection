@@ -1,15 +1,12 @@
 - name: cb-feature-detection
   kind: RealtimeAPI
-  volumes: 
   handler:
     type: python
     path: inference_predict_cortex.py
     config:
       model_url: s3://canopy-production-ml/inference/model_files/model-best.h5
       weights_url: s3://canopy-production ml/inference/model_files/model_weights_best.h5
+      file_dir: s3://canopy-production-ml/full_congo_basin/02.17.21_CB_GEE_Pull/
       job_name: predict_test
       # mode: cortex
       # device: cpu 
-    dependencies:  # (optional)
-      shell: mkdir efs && sudo mount -t nfs4 -o nfsvers=4.1,rsize=1048576,wsize=1048576,hard,timeo=600,retrans=2,noresvport 192.168.73.168:/ efs
-    
