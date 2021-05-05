@@ -228,8 +228,11 @@ class LRFinder(keras.callbacks.Callback):
     the plot method.
     """
 
-    def __init__(self, start_lr: float = 1e-7, end_lr: float = 10, max_steps: int = 100, smoothing=0.9):
+    def __init__(self, start_lr: float = 1e-7, end_lr: float = 10, max_steps: int = 100, smoothing=0.9,                 lcl_chkpt_dir=None,
+                s3_chkpt_dir=None):
         super(LRFinder, self).__init__()
+        self.lcl_chkpt_dir = lcl_chkpt_dir 
+        self.s3_chkpt_dir = s3_chkpt_dir
         self.start_lr, self.end_lr = start_lr, end_lr
         self.max_steps = max_steps
         self.smoothing = smoothing
@@ -242,23 +245,34 @@ class LRFinder(keras.callbacks.Callback):
 
     def on_train_batch_begin(self, batch, logs=None):
         self.lr = self.exp_annealing(self.step)
-        tf.keras.backend.set_value(self.model.optimizer.lr, self.lr)
+        print('Current batch learning rate:',tf.keras.backend.get_value(self.model.optimizer.learning_rate))
+        print('New learning rate:', self.lr)
+        tf.keras.backend.set_value(self.model.optimizer.learning_rate, self.lr)
 
     def on_train_batch_end(self, batch, logs=None):
+        print('Batch end')
         logs = logs or {}
         loss = logs.get('loss')
+        print('Loss:', loss)
         step = self.step
         if loss:
             self.avg_loss = self.smoothing * self.avg_loss + (1 - self.smoothing) * loss
             smooth_loss = self.avg_loss / (1 - self.smoothing ** (self.step + 1))
             self.losses.append(smooth_loss)
             self.lrs.append(self.lr)
+            
+            print('if/then statement 1')
 
             if step == 0 or loss < self.best_loss:
+                print('New best loss found!')
                 self.best_loss = loss
+                
+            print('if/then statement 2')
 
             if smooth_loss > 4 * self.best_loss or tf.math.is_nan(smooth_loss):
                 self.model.stop_training = True
+                
+        print('if/then statement 3')
 
         if step == self.max_steps:
             self.model.stop_training = True
@@ -280,10 +294,13 @@ class LRFinder(keras.callbacks.Callback):
     def on_epoch_end(self, epoch, logs={}):
         epoch = epoch + 1 
         print(f'\nEpoch {epoch} saving lr_finder_object')
-        filename = "lr_finder.pkl"
+        loss = self.losses
+        lr = self.lrs
+        df = pd.DataFrame(data={"loss":loss,"lr":lr})
+        filename = "lr_finder.csv"
         local_path =  self.lcl_chkpt_dir + "/" + filename
         s3_path = self.s3_chkpt_dir + "/" + filename
-        pickle.dump(self, open( local_path, "wb" ) )
+        df.to_csv(local_path,index=False)
         s3 = boto3.resource('s3')
         BUCKET = "canopy-production-ml-output"
         s3.Bucket(BUCKET).upload_file(local_path, s3_path)
@@ -316,6 +333,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--model', type=str, default="resnet")
     parser.add_argument('--callback', type=str, default="lrplateau")
+    parser.add_argument('--early_stop', type=str, default="True")
     parser.add_argument('--clr_initial', type=float, default=.00001)
     parser.add_argument('--clr_max', type=float, default=.0005)
     parser.add_argument('--clr_step', type=int, default=2500)
@@ -326,7 +344,6 @@ if __name__ == '__main__':
     parser.add_argument('--flip_left_right', type=str, default="False")
     parser.add_argument('--flip_up_down', type=str, default="False")
     parser.add_argument('--rot90', type=str, default="False")
-    parser.add_argument('--freeze_bn_layer', default="False")
     parser.add_argument('--numclasses', type=float, default=10)
     parser.add_argument('--bands', required=True)
     parser.add_argument('--bucket', type=str, default="margaux-bucket-us-east-1")
@@ -377,6 +394,12 @@ if __name__ == '__main__':
     else:
         augmentation_data = True
         
+    if args.early_stop.lower() == "false":
+        early_stop = False
+    else:
+        early_stop = True
+        
+        
     lr_callback = args.callback.lower() 
 
     print(f"lr: {lr}, batch_size: {batch_size}, augmentation_data: {augmentation_data}")
@@ -397,7 +420,13 @@ if __name__ == '__main__':
     
     pre_trained_model = args.model
 
-    def define_model(numclasses, input_shape, starting_checkpoint=None, lcl_chkpt_dir=None):
+    #default s3_checkpoint definition
+    s3_chkpt_dir = s3_chkpt_base_dir + "/" + job_name
+    
+    #testing_s3_spot_restart_functionality
+#     s3_chkpt_dir = "ckpt/pc-tf-custom-container-2021-04-20-05-19-50-592"
+
+    def define_model(numclasses, input_shape, starting_checkpoint=None, lcl_chkpt_dir=None,s3_chkpt_dir=s3_chkpt_dir):
         
         print(f"Using Pre-trained {pre_trained_model} model")
         
@@ -446,26 +475,57 @@ if __name__ == '__main__':
         # this is the model we will train
         model = Model(inputs=base_model.input, outputs=predictions)
 #         model.summary()
-        last_chkpt_path = lcl_chkpt_dir + 'last_chkpt.h5'
-        if os.path.exists(last_chkpt_path):
-            print('New spot instance; loading previous checkpoint')
-            model.load_weights(last_chkpt_path)
+#         last_chkpt_path = lcl_chkpt_dir + 'last_chkpt.h5'
+        
+        s3 = boto3.resource('s3')
+        bucket = "canopy-production-ml-output"
+        my_bucket = s3.Bucket(bucket)
+        key = s3_chkpt_dir
+        h5_files = [obj.key for obj in my_bucket.objects.filter(Prefix=key) if "h5" == obj.key[-2:]]
+        
+        h5_files_dict = {}
+        
+        for file in h5_files:
+            try:
+                match_key = int(file.split('_')[-1].split('.')[0])
+                h5_files_dict[match_key] = file
+            except:
+                continue
+    
+        if h5_files_dict:
+
+            max_epoch = max(h5_files_dict.keys())
+            last_chkpt_s3_path = h5_files_dict[max_epoch]
+            
+            print('Spot instance restarting; loading previous checkpoint from',last_chkpt_s3_path)
+            
+            last_chkpt_filename = last_chkpt_s3_path.split("/")[-1]
+            last_chkpt_local_path = lcl_chkpt_dir + '/' + last_chkpt_filename
+            my_bucket.download_file(last_chkpt_s3_path, last_chkpt_local_path)
+            model.load_weights(last_chkpt_local_path)
+            start_epoch = max_epoch
+            
         elif starting_checkpoint:
+            start_epoch = 0 
             print('No previous checkpoint found in opt/ml/checkpoints directory; loading checkpoint from', starting_checkpoint)
-            s3 = boto3.client('s3')
             chkpt_name = lcl_chkpt_dir + '/' + 'start_chkpt.h5'
-            s3.download_file('canopy-production-ml-output', starting_checkpoint, chkpt_name)
+            my_bucket.download_file(starting_checkpoint, chkpt_name)
             model.load_weights(chkpt_name)
         else:
+            start_epoch = 0 
             print('No previous checkpoint found in opt/ml/checkpoints directory; start training from scratch')
     
-        return model
+        return model,start_epoch
     
-    s3_chkpt_dir = s3_chkpt_base_dir + "/" + job_name
+    
     base_name_checkpoint = "model_resnet"
     save_checkpoint_s3 = SaveCheckpoints(base_name_checkpoint, lcl_chkpt_dir, s3_chkpt_dir)
+    save_lr_finder_s3 = LRFinder(lcl_chkpt_dir=lcl_chkpt_dir, s3_chkpt_dir=s3_chkpt_dir)
+    
+    
 
-    early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_recall', mode='max', patience=20, verbose=1)
+
+    early_stop_callback = tf.keras.callbacks.EarlyStopping(monitor='val_recall', mode='max', patience=20, verbose=1)
     
     if lr_callback == "clr":
         
@@ -489,7 +549,7 @@ if __name__ == '__main__':
         
         lr_reduce_min = args.lr_reduce_min
 
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss',
                                                          mode='min', 
                                                          factor=0.1,
                                                          patience=5, 
@@ -498,14 +558,20 @@ if __name__ == '__main__':
         lr_callback = reduce_lr
     
 
-    callbacks_list = [save_checkpoint_s3, early_stop,lr_callback, WandbCallback()]
+    callbacks_list = [save_checkpoint_s3, early_stop_callback,lr_callback, WandbCallback()]
+    
+    
+    if not early_stop:
+        
+        callbacks_list = [save_checkpoint_s3,lr_callback, WandbCallback()]
+        
     
             
     if lr_callback == "lrfinder":
         
-        lr_callback = LRFinder()
+        lr_callback = save_lr_finder_s3
         
-        callbacks_list = [save_checkpoint_s3, lr_callback, WandbCallback()]
+        callbacks_list = [lr_callback, WandbCallback()]
         
 
     ######## WIP: multi GPUs ###########
@@ -543,7 +609,7 @@ if __name__ == '__main__':
     #                       )
     # else:
     #     print("Running on CPU")
-    model = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
+    model,start_epoch = define_model(numclasses, input_shape, starting_checkpoint, lcl_chkpt_dir)
 
 
     model.compile(loss=BinaryCrossentropy(),
@@ -580,5 +646,6 @@ if __name__ == '__main__':
                         validation_data=gen.validation_dataset,
                         epochs=epochs,
                         callbacks=callbacks_list,
+                        initial_epoch=start_epoch 
                         )
 

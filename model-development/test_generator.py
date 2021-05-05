@@ -98,31 +98,52 @@ label_file_path_test="labels_test_set.csv",
     def read_image(self, path_img):
         
         if self.file_mode == "s3":
-            output_session = boto3.Session()
-            aws_session = AWSSession(output_session)
-            rasterio_env = rasterio.Env(
-                session=aws_session,
-                GDAL_DISABLE_READDIR_ON_OPEN='NO',
-                CPL_VSIL_CURL_USE_HEAD='NO',
-                GDAL_GEOREF_SOURCES='INTERNAL',
-                GDAL_TIFF_INTERNAL_MASK='NO'
-            )
-            with rasterio_env as env:
-                path_to_s3_img = "s3://" + self.bucket_name + "/" + path_img.numpy().decode()
-                with rasterio.open(path_to_s3_img, mode='r', sharing=False, GEOREF_SOURCES='INTERNAL') as src:
-                    if self.bands == ['all']:
-                        # Need to transpose the image to have the channels last and not first as rasterio read the image
-                        # The input for the model is width*height*channels
-                        train_img = np.transpose(src.read(), (1, 2, 0))
-                    else:
-                        train_img = np.transpose(src.read(self.bands), (1, 2, 0))
-        if self.file_mode == "file":
-            path_to_img = self.local_path_train + "/" + path_img.numpy().decode()
-            train_img = np.transpose(rasterio.open(path_to_img).read(self.bands), (1, 2, 0))
             
-            # Normalize image
-        train_img = tf.image.convert_image_dtype(train_img, tf.float32)
-        return train_img
+            print("please use 'file' for the file mode. s3 not supported")
+            
+#             output_session = boto3.Session()
+#             aws_session = AWSSession(output_session)
+#             rasterio_env = rasterio.Env(
+#                 session=aws_session,
+#                 GDAL_DISABLE_READDIR_ON_OPEN='NO',
+#                 CPL_VSIL_CURL_USE_HEAD='NO',
+#                 GDAL_GEOREF_SOURCES='INTERNAL',
+#                 GDAL_TIFF_INTERNAL_MASK='NO'
+#             )
+#             with rasterio_env as env:
+#                 path_to_s3_img = "s3://" + self.bucket_name + "/" + path_img.numpy().decode()
+#                 with rasterio.open(path_to_s3_img, mode='r', sharing=False, GEOREF_SOURCES='INTERNAL') as src:
+#                     if self.bands == ['all']:
+#                         # Need to transpose the image to have the channels last and not first as rasterio read the image
+#                         # The input for the model is width*height*channels
+#                         train_img = np.transpose(src.read(), (1, 2, 0))
+#                     else:
+#                         train_img = np.transpose(src.read(self.bands), (1, 2, 0))
+                        
+        if self.file_mode == "file":
+            
+            path_to_img = self.local_path_train + "/" + path_img.numpy().decode()
+            
+            if 18 in self.bands:
+
+                #create copy of bands list, remove ndvi band from copy 
+                bands_copy = self.bands.copy()
+                bands_copy.remove(18)
+                train_img_no_ndvi = rasterio.open(path_to_img).read(bands_copy)
+                #normalize non_ndvi and ndvi bands separately, then combine as a single tensor (numpy) array
+                train_img_no_ndvi = tf.image.convert_image_dtype(train_img_no_ndvi, tf.float32)
+                ndvi_band = rasterio.open(path_to_img).read(18)
+                train_img_ndvi = tf.image.convert_image_dtype(ndvi_band, tf.float32)
+                train_img = tf.concat([train_img_no_ndvi,[train_img_ndvi]],axis=0)
+                train_img = tf.transpose(train_img,perm=[1, 2, 0])
+
+            else:
+
+                train_img = np.transpose(rasterio.open(path_to_img).read(self.bands), (1, 2, 0))
+                # Normalize image
+                train_img = tf.image.convert_image_dtype(train_img, tf.float32)
+
+            return train_img
 
     def get_label_from_csv(self, path_img):
         # testing if path in the test csv file or in the val one
