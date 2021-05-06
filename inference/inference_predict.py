@@ -78,7 +78,7 @@ def read_image_tf_out(window_arr):
     window_arr_no_ndvi = window_arr_no_ndvi[:-1] 
     tf_img_no_ndvi = tf.image.convert_image_dtype(window_arr_no_ndvi, tf.float32)
     
-    ndvi_band = window_arr_no_ndvi[-1]
+    ndvi_band = window_arr[-1]
     tf_img_ndvi = tf.image.convert_image_dtype(ndvi_band, tf.float32)
     
     tf_img = tf.concat([tf_img_no_ndvi,[tf_img_ndvi]],axis=0)
