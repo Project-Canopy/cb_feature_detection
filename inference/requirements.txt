@@ -1,0 +1,9 @@
+pip==21.0.1
+boto3
+numpy
+pandas
+pyproj
+rasterio
+Shapely
+tensorflow==2.4.0
+tensorflow-addons==0.12.1
