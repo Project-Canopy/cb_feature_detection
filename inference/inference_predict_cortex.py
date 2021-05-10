@@ -42,7 +42,6 @@ class Handler:
                 "total_batch_count": The total number of batches in this job
                 "start_time": The time that this job started
         """
-        self.s3_dir_url = config["file_dir"]
         self.job_name = config["job_name"]
         self.model_url = config["model_url"] 
         self.weights_url = config["weights_url"]
@@ -52,12 +51,17 @@ class Handler:
         self.model = self.load_model()
         self.output_dir = "./output/"
         self.label_list = ["Industrial_agriculture","ISL","Mining","Roads","Shifting_cultivation"]
+        self.job_type = config["type"].lower()
+        if self.job_type == "realtime":
+            self.s3_dir_url = config["file_dir"]
+        if self.job_type == "batch":
+            self.timestamp = config["timestamp"]
         print("model loaded and ready for predictions")
 
         # self.handle_batch()
         
 
-    def handle_post(self, payload):
+    def handle_batch(self, payload):
 
         """(Required) Called once per batch. Preprocesses the batch payload (if
         necessary), runs inference (e.g. by calling
@@ -72,12 +76,20 @@ class Handler:
             Nothing
         """
         print("received payload")
-        if payload["start"].lower() == "none":
-            print("starting predictions")
+
+        if self.job_type == "realtime":
+            if payload["start"].lower() == "none":
+                print("starting real-time predictions")
+                self.predict()
+            else:
+                print("to initiate real-time job pass in 'none' for the 'start' argument in your request")
+        if self.job_type == "batch":
+            print(payload)
+            self.s3_paths = payload
+            print("starting batch predictions")
             self.predict()
-        # if payload["start"].lower() == "cli":
-            # command = payload["command"]
-            # os.system(command)
+            
+        
 
 
     def on_job_complete(self):
@@ -161,7 +173,7 @@ class Handler:
         window_arr_no_ndvi = window_arr_no_ndvi[:-1] 
         tf_img_no_ndvi = tf.image.convert_image_dtype(window_arr_no_ndvi, tf.float32)
         
-        ndvi_band = window_arr_no_ndvi[-1]
+        ndvi_band = window_arr[-1]
         tf_img_ndvi = tf.image.convert_image_dtype(ndvi_band, tf.float32)
         
         tf_img = tf.concat([tf_img_no_ndvi,[tf_img_ndvi]],axis=0)
@@ -195,7 +207,7 @@ class Handler:
     def add_ndvi(self,data, dtype_1=rio.float32):
         
         nir = data[3].astype(dtype_1)
-        red = data[0].astype(dtype_1)
+        red = data[2].astype(dtype_1)
         # Allow division by zero
         np.seterr(divide='ignore', invalid='ignore')
         # Calculate NDVI
@@ -218,10 +230,14 @@ class Handler:
         model=self.model
         label_list=self.label_list
         # granule_list=glob(f'{granule_dir}/*.tif')
-        granule_list = self.s3_dir_ls(self.s3_dir_url)
+        if self.job_type == "realtime":
+            granule_list = self.s3_dir_ls(self.s3_dir_url)
+            timestamp = self.gen_timestamp()
+        if self.job_type == "batch":
+            granule_list = self.s3_paths
+            timestamp = self.timestamp
         print(f"found {len(granule_list)} granules")
         output_dict={}
-        timestamp=self.gen_timestamp()
         for j,granule_path in enumerate(granule_list):
             granule_id = granule_path.split("/")[-1].split("_")[0]
 

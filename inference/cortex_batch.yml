@@ -1,0 +1,13 @@
+- name: cb-feature-detection
+  kind: BatchAPI
+  handler:
+    type: python
+    path: inference_predict_cortex.py
+    config:
+      model_url: s3://canopy-production-ml/inference/model_files/model-best.h5
+      weights_url: s3://canopy-production ml/inference/model_files/model_weights_best.h5
+      # file_dir: s3://canopy-production-ml/full_congo_basin/02.17.21_CB_GEE_Pull/
+      job_name: predict_test
+      type: batch
+      timestamp: none
+  
