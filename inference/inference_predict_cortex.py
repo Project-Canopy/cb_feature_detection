@@ -56,6 +56,16 @@ class Handler:
             self.s3_dir_url = config["file_dir"]
         if self.job_type == "batch":
             self.timestamp = config["timestamp"]
+        self.full_name = f'{self.job_name}-{self.timestamp}.json'
+        self.output_s3_base_path = "s3://canopy-production-ml/inference/output/"
+        self.full_s3_path = self.output_s3_base_path + self.full_name
+        self.key = "/".join(self.output_s3_base_path.split("/")[3:]) + self.full_name
+        self.BUCKET = self.output_s3_base_path.split("/")[2]
+        if not os.path.exists(self.output_dir):
+            os.system(f"mkdir {self.output_dir}")
+        self.local_file_path = self.output_dir + self.full_name
+        
+        
         print("model loaded and ready for predictions")
 
         # self.handle_batch()
@@ -86,8 +96,20 @@ class Handler:
         if self.job_type == "batch":
             print(payload)
             self.s3_paths = payload
-            print("starting batch predictions")
-            self.predict()
+            previous_dict = self.download_json()
+            if previous_dict:
+                current_id = payload[0].split("/")[-1].split("_")[0]
+                if current_id in list(previous_dict.keys()):
+                    print(f"granule id {current_id} is already in {self.full_name} on s3")
+                    pass
+                else:
+                    print("continuing batch predictions")
+                    self.predict()
+            else:
+                print("starting batch predictions")
+                self.predict()
+
+            
             
         
 
@@ -98,6 +120,8 @@ class Handler:
         results, executing web hooks, or triggering other jobs.
         """
         pass
+
+
 
     
     def download_model_files(self):
@@ -137,34 +161,35 @@ class Handler:
 
         return objs[1:]
 
+    def download_json(self):
+
+        try:
+            s3 = boto3.resource('s3')
+            s3.Bucket(self.BUCKET).download_file(self.key, self.local_file_path)
+            with open(self.local_file_path) as j:
+                json_data = json.load(j)
+            return json_data
+        except:
+            print("no json file found")
+            return None
 
     def gen_timestamp(self):
         time_stamp = time.strftime("%Y-%m-%d-%H-%M-%S", time.gmtime())
         return time_stamp
 
-    def save_to_s3(self,output_dict,timestamp):
+    def save_to_s3(self,output_dict):
 
-        output_dir = self.output_dir
-        os.system(f"mkdir {output_dir}")
-        filename = "output.json"
-        file_path = output_dir + filename
-        
-        with open(file_path, 'w') as jp:
-            json.dump(output_dict, jp)
-            
-        output_base_path = "s3://canopy-production-ml/inference/output/"
-        job_name = self.job_name
-        full_name = f'{job_name}-{timestamp}.json'
-        s3_path = "/".join(output_base_path.split("/")[3:]) + full_name
-        BUCKET = output_base_path.split("/")[2]
         s3 = boto3.resource('s3')
-        s3.Bucket(BUCKET).upload_file(file_path, s3_path)
+
+        if self.job_type == "batch" and self.full_s3_path in self.s3_dir_ls(self.output_s3_base_path):
+            print(f"existing json record {self.full_name} for job found on s3. appending to existing file")
+            json_data = self.download_json()   
+            output_dict.update(json_data)
+
+        with open(self.local_file_path, "w") as f:
+            json.dump(output_dict, f)   
         
-    # def read_json_label_file():
-        # to create
-        
-    # def output_sample_chips(json_file,label_name,amount_of_chips):
-        # to do
+        s3.Bucket(self.BUCKET).upload_file(self.local_file_path, self.key)
 
     def read_image_tf_out(self,window_arr):
 
@@ -279,7 +304,7 @@ class Handler:
                         output_dict[granule_id].append({"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list})
                     else:
                         output_dict[granule_id] = [{"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list}]
-            self.save_to_s3(output_dict,timestamp)
+            self.save_to_s3(output_dict)
 
 
         return 
