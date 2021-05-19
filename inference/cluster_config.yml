@@ -10,11 +10,11 @@ availability_zones:  # default: 1 random availability zones in your region, e.g.
 # list of cluster node groups; the smaller index, the higher the priority of the node group
 node_groups:
   - name: ng-cpu # name of the node group
-    instance_type: m5.xlarge # instance type
+    instance_type: m5.2xlarge # instance type
     min_instances: 1 # minimum number of instances
-    max_instances: 4 # maximum number of instances
-    instance_volume_size: 20 # disk storage size per instance (GB)
-    instance_volume_type: gp2 # instance volume type [gp2 | io1 | st1 | sc1]
+    max_instances: 10 # maximum number of instances
+    instance_volume_size: 50 # disk storage size per instance (GB)
+    instance_volume_type: gp3 # instance volume type [gp2 | io1 | st1 | sc1]
     # instance_volume_iops: 3000 # instance volume iops (only applicable to io1)
     spot: true # whether to use spot instances
 
@@ -23,7 +23,7 @@ node_groups:
   #   min_instances: 1
   #   max_instances: 2
   #   instance_volume_size: 50
-  #   instance_volume_type: gp2
+  #   instance_volume_type: gp3
   #   # instance_volume_iops: 3000
   #   spot: true
 

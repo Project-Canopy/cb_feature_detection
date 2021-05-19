@@ -19,6 +19,8 @@ from tensorflow_addons.metrics import F1Score, HammingLoss
 import random
 import time
 from glob import glob
+from rasterio.enums import Resampling
+from rasterio.vrt import WarpedVRT
 
 
 class Handler:
@@ -52,6 +54,7 @@ class Handler:
         self.output_dir = "./output/"
         self.label_list = ["Industrial_agriculture","ISL","Mining","Roads","Shifting_cultivation"]
         self.job_type = config["type"].lower()
+        self.src_crs = "EPSG:" + str(config["source_crs"])
         if self.job_type == "realtime":
             self.s3_dir_url = config["file_dir"]
         if self.job_type == "batch":
@@ -100,7 +103,7 @@ class Handler:
             if previous_dict:
                 current_id = payload[0].split("/")[-1].split("_")[0]
                 if current_id in list(previous_dict.keys()):
-                    print(f"granule id {current_id} is already in {self.full_name} on s3")
+                    print(f"granule id {current_id} is already in {self.full_name} on s3. skipping prediction.")
                     pass
                 else:
                     print("continuing batch predictions")
@@ -108,10 +111,6 @@ class Handler:
             else:
                 print("starting batch predictions")
                 self.predict()
-
-            
-            
-        
 
 
     def on_job_complete(self):
@@ -259,6 +258,7 @@ class Handler:
             granule_list = self.s3_dir_ls(self.s3_dir_url)
             timestamp = self.gen_timestamp()
         if self.job_type == "batch":
+            print(self.s3_paths)
             granule_list = self.s3_paths
             timestamp = self.timestamp
         print(f"found {len(granule_list)} granules")
@@ -267,44 +267,48 @@ class Handler:
             granule_id = granule_path.split("/")[-1].split("_")[0]
 
             with rio.open(granule_path) as src:
-                windows = self.get_windows(src.shape, (patch_size, patch_size), (stride, stride))
 
-                for i, window in enumerate(windows):
-                    print(f"predicting window {i + 1} of {len(windows)} of granulate {j + 1} of {len(granule_list)}",end='\r', flush=True)
-                    label_name_list = []
-                    window_id = i+1
-                    data = src.read(bands,window=window, masked=True)
-                    data = self.add_ndvi(data)
-                    shape = data.shape
-                    new_shape = (data.shape[0],patch_size,patch_size)
+                with WarpedVRT(src, crs=self.src_crs, resampling=Resampling.nearest) as vrt:
 
-                    if shape != new_shape:
-                        filled_array = np.full(new_shape, 0)
-                        filled_array[:shape[0],:shape[1],:shape[2]] = data
-                        data = filled_array
-                        window = Window(window.col_off,window.row_off,shape[2],shape[1])
+                    windows = self.get_windows(vrt.shape, (patch_size, patch_size), (stride, stride))
+
+                    for i, window in enumerate(windows):
+                        print(f"predicting window {i + 1} of {len(windows)} of granulate {j + 1} of {len(granule_list)}",end='\r', flush=True)
+                        label_name_list = []
+                        window_id = i+1
+                        data = vrt.read(bands,window=window, masked=True)
+                        data = self.add_ndvi(data)
+                        shape = data.shape
+                        new_shape = (data.shape[0],patch_size,patch_size)
+
+                        if shape != new_shape:
+                            filled_array = np.full(new_shape, 0)
+                            filled_array[:shape[0],:shape[1],:shape[2]] = data
+                            data = filled_array
+                            window = Window(window.col_off,window.row_off,shape[2],shape[1])
 
 
-                    #image pre-processing / inference
-                    prediction = model.predict(self.read_image_tf_out(data))
-                    prediction = np.where(prediction > predict_thresh, 1, 0)
-                    prediction_i = np.where(prediction == 1)[1]
-                    for i in prediction_i:
-                        label_name_list.append(label_list[i])
+                        #image pre-processing / inference
+                        prediction = model.predict(self.read_image_tf_out(data))
+                        prediction = np.where(prediction > predict_thresh, 1, 0)
+                        prediction_i = np.where(prediction == 1)[1]
+                        for i in prediction_i:
+                            label_name_list.append(label_list[i])
 
-                    #vectorizing raster bounds for visualization 
-                    window_bounds = rio.windows.bounds(window, src.transform, height=patch_size, width=patch_size)
-                    geom = box(*window_bounds)
-                    geom_coords = list(geom.exterior.coords)
-    #                 window_geom_list.append(geom)
+                        #vectorizing raster bounds for visualization 
+                        window_bounds = rio.windows.bounds(window, vrt.transform, height=patch_size, width=patch_size)
+                        geom = box(*window_bounds)
+                        geom_coords = list(geom.exterior.coords)
+        #                 window_geom_list.append(geom)
 
-                    #create or append to dict....
+                        #create or append to dict....
 
-                    if granule_id in output_dict:
-                        output_dict[granule_id].append({"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list})
-                    else:
-                        output_dict[granule_id] = [{"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list}]
-            self.save_to_s3(output_dict)
+                        if granule_id in output_dict:
+                            output_dict[granule_id].append({"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list})
+                        else:
+                            output_dict[granule_id] = [{"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list}]
+
+                    self.save_to_s3(output_dict)
 
 
         return 
