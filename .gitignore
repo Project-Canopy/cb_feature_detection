@@ -143,4 +143,5 @@ sagemaker_staging/docker_test_folder/wandb/
 # hidden packages
 
 display/packages/
+display/cb-raster-process/lambda_package
 

@@ -9,8 +9,8 @@ from glob import glob
 def s3_dir_ls(granule_dir):
 
     objs = []
-    bucket = s3_dir_url.split("/")[2]
-    key = "/".join(s3_dir_url.split("/")[3:])
+    bucket = granule_dir.split("/")[2]
+    key = "/".join(granule_dir.split("/")[3:])
 
     s3 = boto3.resource('s3')
     my_bucket = s3.Bucket(bucket)

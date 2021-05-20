@@ -1,5 +1,4 @@
 import logging
-import math
 from convert_rasters import convert_granules
 
 
