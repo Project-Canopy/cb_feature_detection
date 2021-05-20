@@ -1,5 +1,5 @@
 import logging
-from convert_rasters import convert_granules
+from convert_rasters import convert_granule
 
 
 logger = logging.getLogger()
@@ -19,7 +19,7 @@ def lambda_handler(event, context):
     """
     logger.info(f'Event: {event}')
 
-    result = convert_granules(event["granule_dir"],event["dest_dir"])
+    result = convert_granule(event["granule_path"],event["dest_dir"])
     logger.info('Calculated result:', result)
 
     response = {'result': result}
