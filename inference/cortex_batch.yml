@@ -1,0 +1,13 @@
+- name: cb-feature-detection-4326
+  kind: BatchAPI
+  handler:
+    type: python
+    path: inference_predict_cortex.py
+    config:
+      model_url: s3://canopy-production-ml/inference/model_files/model-best.h5
+      weights_url: s3://canopy-production ml/inference/model_files/model_weights_best.h5
+      source_crs: 4326
+      job_name: predict_4326
+      type: batch
+      timestamp: none
+  
