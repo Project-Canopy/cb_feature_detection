@@ -7,9 +7,6 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Define a list of Python lambda functions that are called by this AWS Lambda function.
-ACTIONS = {
-    'convert_granules': convert_granules
-}
 
 
 def lambda_handler(event, context):
@@ -23,7 +20,7 @@ def lambda_handler(event, context):
     """
     logger.info(f'Event: {event}')
 
-    result = ACTIONS[event['action']](event['granule_list'], event['dest_dir'])
+    result = convert_granules(event["granule_dir"],event["dest_dir"])
     logger.info('Calculated result:', result)
 
     response = {'result': result}
