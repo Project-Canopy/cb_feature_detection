@@ -26,7 +26,7 @@ def upload_rasters(token=None, mapId=None, start=None, total=None):
         el.uploadRasterFile(mapId=mapId, timestampId=new_timestamp, file=rast_paths[i], token=token, fileFormat='tif')
 
 
-if __name__ == "main":
+if __name__ == "__main__":
 
     token = el.logIn(username, password)
     print(token)
