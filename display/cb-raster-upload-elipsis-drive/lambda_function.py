@@ -10,6 +10,7 @@ def upload_rasters(token=None, mapId=None, start=None, total=None):
     startDate = "2019-01-01"
     endDate = "2020-12-31"
     new_timestamp = el.addTimestamp(mapId=mapId, startDate=startDate, endDate=endDate, token=token)
+    print(new_timestamp)
     
     if start == None and total == None:
         start = 0 
