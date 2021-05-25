@@ -23,7 +23,7 @@ def upload_rasters(token=None, mapId=None, start=None, total=None):
         start = 0 
         stop = start+total
         
-    
+    print(start,stop)
     for i in range(start,stop):
         print(f'uploading raster {i+1} of {stop}', flush=True, end="\r")
         el.uploadRasterFile(mapId=mapId, timestampId=new_timestamp, file=rast_paths[i], token=token, fileFormat='tif')
