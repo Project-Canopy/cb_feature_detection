@@ -29,6 +29,7 @@ def upload_rasters(token=None, mapId=None, start=None, total=None):
 if __name__ == "main":
 
     token = el.logIn(username, password)
+    print(token)
     mapId = el.getMapId("Congo_Basin_PC_Full",token=token)
 
     upload_rasters(token=token, mapId=mapId)
