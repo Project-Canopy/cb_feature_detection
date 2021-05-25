@@ -2,7 +2,7 @@ import ellipsis as el
 from glob import glob
 from ENV_Vars import *
 
-def upload_rasters(token=token, mapId=mapId, start=None, total=None):
+def upload_rasters(token=None, mapId=None, start=None, total=None):
     
     rast_paths = glob("efs_cb_rgb/*.tif")
     startDate = "2019-01-01"
