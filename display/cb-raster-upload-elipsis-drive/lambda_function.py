@@ -3,8 +3,8 @@ from glob import glob
 from ENV_Vars import *
 
 def upload_rasters(token=None, mapId=None, start=None, total=None):
-
-    "running upload function"
+    
+    print("running upload function")
     
     rast_paths = glob("efs_cb_rgb/*.tif")
     startDate = "2019-01-01"
