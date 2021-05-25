@@ -31,4 +31,4 @@ if __name__ == "main":
     token = el.logIn(username, password)
     mapId = el.getMapId("Congo_Basin_PC_Full",token=token)
 
-    upload_rasters()
+    upload_rasters(token=token, mapId=mapId)
