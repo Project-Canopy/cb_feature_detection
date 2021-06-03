@@ -145,3 +145,4 @@ sagemaker_staging/docker_test_folder/wandb/
 display/packages/
 display/cb-raster-process/lambda_package
 
+analytics/ISL_Training_Labels.geojson
