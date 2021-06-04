@@ -19,6 +19,8 @@ from tensorflow_addons.metrics import F1Score, HammingLoss
 import random
 import time
 from glob import glob
+from rasterio.enums import Resampling
+from rasterio.vrt import WarpedVRT
 
 
 class Handler:
@@ -42,7 +44,6 @@ class Handler:
                 "total_batch_count": The total number of batches in this job
                 "start_time": The time that this job started
         """
-        self.s3_dir_url = config["file_dir"]
         self.job_name = config["job_name"]
         self.model_url = config["model_url"] 
         self.weights_url = config["weights_url"]
@@ -52,12 +53,28 @@ class Handler:
         self.model = self.load_model()
         self.output_dir = "./output/"
         self.label_list = ["Industrial_agriculture","ISL","Mining","Roads","Shifting_cultivation"]
+        self.job_type = config["type"].lower()
+        self.src_crs = "EPSG:" + str(config["source_crs"])
+        if self.job_type == "realtime":
+            self.s3_dir_url = config["file_dir"]
+        if self.job_type == "batch":
+            self.timestamp = config["timestamp"]
+        self.full_name = f'{self.job_name}-{self.timestamp}.json'
+        self.output_s3_base_path = "s3://canopy-production-ml/inference/output/"
+        self.full_s3_path = self.output_s3_base_path + self.full_name
+        self.key = "/".join(self.output_s3_base_path.split("/")[3:]) + self.full_name
+        self.BUCKET = self.output_s3_base_path.split("/")[2]
+        if not os.path.exists(self.output_dir):
+            os.system(f"mkdir {self.output_dir}")
+        self.local_file_path = self.output_dir + self.full_name
+        
+        
         print("model loaded and ready for predictions")
 
         # self.handle_batch()
         
 
-    def handle_post(self, payload):
+    def handle_batch(self, payload):
 
         """(Required) Called once per batch. Preprocesses the batch payload (if
         necessary), runs inference (e.g. by calling
@@ -72,12 +89,28 @@ class Handler:
             Nothing
         """
         print("received payload")
-        if payload["start"].lower() == "none":
-            print("starting predictions")
-            self.predict()
-        # if payload["start"].lower() == "cli":
-            # command = payload["command"]
-            # os.system(command)
+
+        if self.job_type == "realtime":
+            if payload["start"].lower() == "none":
+                print("starting real-time predictions")
+                self.predict()
+            else:
+                print("to initiate real-time job pass in 'none' for the 'start' argument in your request")
+        if self.job_type == "batch":
+            print(payload)
+            self.s3_paths = payload
+            previous_dict = self.download_json()
+            if previous_dict:
+                current_id = payload[0].split("/")[-1].split("_")[0]
+                if current_id in list(previous_dict.keys()):
+                    print(f"granule id {current_id} is already in {self.full_name} on s3. skipping prediction.")
+                    pass
+                else:
+                    print("continuing batch predictions")
+                    self.predict()
+            else:
+                print("starting batch predictions")
+                self.predict()
 
 
     def on_job_complete(self):
@@ -86,6 +119,8 @@ class Handler:
         results, executing web hooks, or triggering other jobs.
         """
         pass
+
+
 
     
     def download_model_files(self):
@@ -125,34 +160,35 @@ class Handler:
 
         return objs[1:]
 
+    def download_json(self):
+
+        try:
+            s3 = boto3.resource('s3')
+            s3.Bucket(self.BUCKET).download_file(self.key, self.local_file_path)
+            with open(self.local_file_path) as j:
+                json_data = json.load(j)
+            return json_data
+        except:
+            print("no json file found")
+            return None
 
     def gen_timestamp(self):
         time_stamp = time.strftime("%Y-%m-%d-%H-%M-%S", time.gmtime())
         return time_stamp
 
-    def save_to_s3(self,output_dict,timestamp):
+    def save_to_s3(self,output_dict):
 
-        output_dir = self.output_dir
-        os.system(f"mkdir {output_dir}")
-        filename = "output.json"
-        file_path = output_dir + filename
-        
-        with open(file_path, 'w') as jp:
-            json.dump(output_dict, jp)
-            
-        output_base_path = "s3://canopy-production-ml/inference/output/"
-        job_name = self.job_name
-        full_name = f'{job_name}-{timestamp}.json'
-        s3_path = "/".join(output_base_path.split("/")[3:]) + full_name
-        BUCKET = output_base_path.split("/")[2]
         s3 = boto3.resource('s3')
-        s3.Bucket(BUCKET).upload_file(file_path, s3_path)
+
+        if self.job_type == "batch" and self.full_s3_path in self.s3_dir_ls(self.output_s3_base_path):
+            print(f"existing json record {self.full_name} for job found on s3. appending to existing file")
+            json_data = self.download_json()   
+            output_dict.update(json_data)
+
+        with open(self.local_file_path, "w") as f:
+            json.dump(output_dict, f)   
         
-    # def read_json_label_file():
-        # to create
-        
-    # def output_sample_chips(json_file,label_name,amount_of_chips):
-        # to do
+        s3.Bucket(self.BUCKET).upload_file(self.local_file_path, self.key)
 
     def read_image_tf_out(self,window_arr):
 
@@ -161,7 +197,7 @@ class Handler:
         window_arr_no_ndvi = window_arr_no_ndvi[:-1] 
         tf_img_no_ndvi = tf.image.convert_image_dtype(window_arr_no_ndvi, tf.float32)
         
-        ndvi_band = window_arr_no_ndvi[-1]
+        ndvi_band = window_arr[-1]
         tf_img_ndvi = tf.image.convert_image_dtype(ndvi_band, tf.float32)
         
         tf_img = tf.concat([tf_img_no_ndvi,[tf_img_ndvi]],axis=0)
@@ -195,7 +231,7 @@ class Handler:
     def add_ndvi(self,data, dtype_1=rio.float32):
         
         nir = data[3].astype(dtype_1)
-        red = data[0].astype(dtype_1)
+        red = data[2].astype(dtype_1)
         # Allow division by zero
         np.seterr(divide='ignore', invalid='ignore')
         # Calculate NDVI
@@ -218,52 +254,61 @@ class Handler:
         model=self.model
         label_list=self.label_list
         # granule_list=glob(f'{granule_dir}/*.tif')
-        granule_list = self.s3_dir_ls(self.s3_dir_url)
+        if self.job_type == "realtime":
+            granule_list = self.s3_dir_ls(self.s3_dir_url)
+            timestamp = self.gen_timestamp()
+        if self.job_type == "batch":
+            print(self.s3_paths)
+            granule_list = self.s3_paths
+            timestamp = self.timestamp
         print(f"found {len(granule_list)} granules")
         output_dict={}
-        timestamp=self.gen_timestamp()
         for j,granule_path in enumerate(granule_list):
             granule_id = granule_path.split("/")[-1].split("_")[0]
 
             with rio.open(granule_path) as src:
-                windows = self.get_windows(src.shape, (patch_size, patch_size), (stride, stride))
 
-                for i, window in enumerate(windows):
-                    print(f"predicting window {i + 1} of {len(windows)} of granulate {j + 1} of {len(granule_list)}",end='\r', flush=True)
-                    label_name_list = []
-                    window_id = i+1
-                    data = src.read(bands,window=window, masked=True)
-                    data = self.add_ndvi(data)
-                    shape = data.shape
-                    new_shape = (data.shape[0],patch_size,patch_size)
+                with WarpedVRT(src, crs=self.src_crs, resampling=Resampling.nearest) as vrt:
 
-                    if shape != new_shape:
-                        filled_array = np.full(new_shape, 0)
-                        filled_array[:shape[0],:shape[1],:shape[2]] = data
-                        data = filled_array
-                        window = Window(window.col_off,window.row_off,shape[2],shape[1])
+                    windows = self.get_windows(vrt.shape, (patch_size, patch_size), (stride, stride))
+
+                    for i, window in enumerate(windows):
+                        print(f"predicting window {i + 1} of {len(windows)} of granulate {j + 1} of {len(granule_list)}",end='\r', flush=True)
+                        label_name_list = []
+                        window_id = i+1
+                        data = vrt.read(bands,window=window, masked=True)
+                        data = self.add_ndvi(data)
+                        shape = data.shape
+                        new_shape = (data.shape[0],patch_size,patch_size)
+
+                        if shape != new_shape:
+                            filled_array = np.full(new_shape, 0)
+                            filled_array[:shape[0],:shape[1],:shape[2]] = data
+                            data = filled_array
+                            window = Window(window.col_off,window.row_off,shape[2],shape[1])
 
 
-                    #image pre-processing / inference
-                    prediction = model.predict(self.read_image_tf_out(data))
-                    prediction = np.where(prediction > predict_thresh, 1, 0)
-                    prediction_i = np.where(prediction == 1)[1]
-                    for i in prediction_i:
-                        label_name_list.append(label_list[i])
+                        #image pre-processing / inference
+                        prediction = model.predict(self.read_image_tf_out(data))
+                        prediction = np.where(prediction > predict_thresh, 1, 0)
+                        prediction_i = np.where(prediction == 1)[1]
+                        for i in prediction_i:
+                            label_name_list.append(label_list[i])
 
-                    #vectorizing raster bounds for visualization 
-                    window_bounds = rio.windows.bounds(window, src.transform, height=patch_size, width=patch_size)
-                    geom = box(*window_bounds)
-                    geom_coords = list(geom.exterior.coords)
-    #                 window_geom_list.append(geom)
+                        #vectorizing raster bounds for visualization 
+                        window_bounds = rio.windows.bounds(window, vrt.transform, height=patch_size, width=patch_size)
+                        geom = box(*window_bounds)
+                        geom_coords = list(geom.exterior.coords)
+        #                 window_geom_list.append(geom)
 
-                    #create or append to dict....
+                        #create or append to dict....
 
-                    if granule_id in output_dict:
-                        output_dict[granule_id].append({"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list})
-                    else:
-                        output_dict[granule_id] = [{"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list}]
-            self.save_to_s3(output_dict,timestamp)
+                        if granule_id in output_dict:
+                            output_dict[granule_id].append({"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list})
+                        else:
+                            output_dict[granule_id] = [{"window_id":window_id,"polygon_coords":geom_coords,"labels":label_name_list}]
+
+                    self.save_to_s3(output_dict)
 
 
         return 
