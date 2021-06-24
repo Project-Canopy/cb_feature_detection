@@ -147,3 +147,4 @@ display/cb-raster-process/lambda_package
 
 analytics/ISL_Training_Labels.geojson
 .DS_Store
+analytics/osm_relevant_clipped.geojson
