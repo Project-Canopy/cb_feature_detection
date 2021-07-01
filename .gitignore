@@ -149,3 +149,4 @@ analytics/ISL_Training_Labels.geojson
 .DS_Store
 analytics/osm_relevant_clipped.geojson
 inference/inference_output/result.json
+*.geojson
