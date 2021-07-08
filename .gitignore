@@ -150,3 +150,4 @@ analytics/ISL_Training_Labels.geojson
 analytics/osm_relevant_clipped.geojson
 inference/inference_output/result.json
 *.geojson
+*.csv
