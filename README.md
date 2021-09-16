@@ -7,114 +7,50 @@ Each of the headings below refer to a subdirectory representing a discrete phase
  <br />
 Description: all model training and model validation resources
 <br />
+<br />
 
-Please keep in mind the following requirements:
+Requirements:
 
+* IAM Role under Project Canopy AWS Account
+* Full Sagemaker priveledges 
+* Full EFS priveledges 
+* EFS Volume of Bucket containing train/test/val chips from S3
 
-* Full Sagemaker priveledges for 
+Assets:
 
-
-All previously saved TF checkpoints files:
-
-s3://canopy-production-ml-output/ckpt/
-
-
-* Digdag [installation](https://docs.digdag.io/getting_started.html). Test by running ```digdag``` in your CLI.  
-* Current logged-in account has sudo priveleges 
-* [Installed](https://www.sqlshack.com/setting-up-a-postgresql-database-on-mac/) PostgreSQL Database on your operating system
-* Confirmed [Psql interactive terminal](http://postgresguide.com/utilities/psql.html) can be accessed in your cli via ```psql``` commands 
-* [Created](https://tableplus.com/blog/2018/10/how-to-create-superuser-in-postgresql.html) a SUPERUSER role that will be used to run the commands with a specified password 
-* Because we will be running the script in <i>local</i> mode, you will need to run the following digdag command to set the key on behalf of the program
-
-```
-digdag secrets --local --set pg.password=your_postgresql_password_here
-```
+* All previously generated checkpoint files: s3://canopy-production-ml-output/ckpt/
 
 
-* Installed [embulk](https://www.embulk.org/)
-* Install input plugins for Embulk-postgresql with command  
-```
-embulk gem install embulk-input-postgresql
-```
-* Install output plugins for Embulk-postgresql with command
-```
-embulk gem install embulk-output-postgresql
-```
+* Training chips acquired via GEE utilizing PC's custom cloud masking preprocessing solution
+  * Most current version of chips (per label) utilized by label lists in the same directory 
+    * s3://canopy-production-ml/chips/cloudfree-merge-polygons/dataset_v2/
+  * Original chips (per label)
+    * s3://canopy-production-ml/chips/cloudfree-merge-polygons/yes/  
+  * All chips (unsorted) acquired via GEE utilizing Sentinal Hub's S2Cloudless cloud-free dataset
+    * s3://canopy-production-ml/chips/s2cloudless/
+
+
+* training / test / val lists in CSV format containing relative file paths to all respective chip assets to be utilized for Tensorflow's Data Generator 
+  * Parent directory within here:  s3://canopy-production-ml/chips/cloudfree-merge-polygons/dataset_v2/
+
+
+* <b>new_labels.json</b> - contained within the git parent directory, this file maps integers to specific label names. Required for use <b>test_generator.py</b> script 
 
 <br />
 
+Notebooks:
 
-* Read [this](https://github.com/treasure-data/digdag/issues/423) issue page if you run into problems with PGSQL <-> digdag setup
+* <b> Sagemaker_TensorFlow_Training </b> - For local testing and cloud training optimized for Sagemaker's TensorFlow Estimator. Utilizes <b>train_no_s3.py</b> script
+* <b> evaluation_master </b> - For evaluating performance of specific checkpoint (model weights). Careful attention should be placed on ensuring you are using the same band combination as the training session associated with the same checkpoint. Evaluation notebook mostly utilized within a Sagemaker on-demand notebook environment due to relatively long feedback time when running evaluation on locally stored chips. Will require an EFS volume. Sample EFS volume mounting code contained at the top of the notebook.      
 
-<br /> 
-<br /> 
+<br />
 
-* The directory / file structure:
+Scripts:
 
-
-
-```
-├── README.md
-├── server_log_digdag_embulk_workflow.txt
-├── server_log_digdag_no_embulk_workflow.txt
-└── pg_td.dig
-      └── embulk_tasks (for embulk workflow version only)
-            └── seed_loadCustomers1.yml
-            └── seed_loadCustomers2.yml
-            └── seed_loadPageViews1.yml
-            └── seed_loadPageViews2.yml
-      └── queries
-            └── create_pgviews_custs_tmp.sql (for non-embulk version only)
-            └── create_custs_final.sql
-            └── create_pageviews_final.sql
-            └── insert_pgviews_custs_csv.sql (for non-embulk version only)
-            └── count_pageviews.sql
-            └── top_3_users.sql
-      └── files
-            └── customers_1.csv
-            └── customers_2.csv
-            └── pageviews_1.csv
-            └── pageviews_2.csv 
-```
+* <b> train_no_s3.py </b> - Used for the SageMaker TensorFlow Estimator for training. 
+* <b> test_generator.py </b> - Used for packaging the respective evaluation chips dataset within the <b>evaluation_master</b> notebook.   
 
 
 
-<br /> 
-
----
-<br /> 
-<br /> 
-<br /> 
-
-## Digdag config  
-
-<br /> 
-
-
-
-Modify the values of the following keys in the digdag script <i>pg_td.dig</i> script:
-
-* <b>user</b> - name of PSQL user running the script
-* <b>database</b> - name of the database for the script run. The database has to exist. 
-* <b>password</b> - should be same password as used in the digdag secret password command, your db pass 
-* <b>use_embulk</b> - flag for whether the script using embulk or native postgres commands for the data ingestion step
-* <b>pgviews1</b>,<b>pgviews2</b>,<b>custs1</b>,<b>custs2</b> - respective absolute file paths to the csv files within the directory structure.  
-
-
-
-##  Running the script 
-
-<br /> 
-
-* In your CLI go to the root directory containing the <i>pg_td.dig</i> script
-* Once you've confirmed that digdag is properly installed, run the following command to initiate the script 
-
-```
-digdag run pg_td.dig -a
-```
-
-* To try both the embulk and native psql versions of the workflow, toggle between <i>true</i> and <i>false</i> for the <b>use_embulk</b> flag 
-
-
-
+## inference
 
