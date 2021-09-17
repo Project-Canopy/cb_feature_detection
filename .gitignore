@@ -139,6 +139,7 @@ data-prep/yes_chips_s3.json
 
 model-development/wandb/
 sagemaker_staging/docker_test_folder/wandb/
+display/cb-raster-process/
 
 # hidden packages
 
