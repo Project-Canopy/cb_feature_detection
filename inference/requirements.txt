@@ -5,5 +5,5 @@ pandas
 pyproj
 rasterio
 Shapely
-tensorflow==2.4.0
+tensorflow==2.9.3
 tensorflow-addons==0.12.1
